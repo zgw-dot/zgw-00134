@@ -1,0 +1,56 @@
+[
+  {
+    "dish_id": "D001",
+    "meal_date": "2026-06-15",
+    "meal_type": "breakfast",
+    "dish_name": "花生酱吐司配牛奶",
+    "ingredients": ["吐司面包", "花生酱", "牛奶", "黄油"],
+    "allergens_tagged": []
+  },
+  {
+    "dish_id": "D002",
+    "meal_date": "2026-06-15",
+    "meal_type": "lunch",
+    "dish_name": "小麦粉面条配虾子浇头",
+    "ingredients": ["小麦粉", "面条", "虾子", "酱油", "葱花"],
+    "allergens_tagged": []
+  },
+  {
+    "dish_id": "D003",
+    "meal_date": "2026-06-15",
+    "meal_type": "dinner",
+    "dish_name": "鸡蛋炒饭配大豆油炒菜",
+    "ingredients": ["米饭", "鸡蛋", "大豆油", "胡萝卜", "青豆"],
+    "allergens_tagged": []
+  },
+  {
+    "dish_id": "D004",
+    "meal_date": "2026-06-15",
+    "meal_type": "breakfast",
+    "dish_name": "全麦三明治",
+    "ingredients": ["全麦面包", "火腿", "奶酪", "生菜", "蛋黄酱"],
+    "allergens_tagged": ["乳制品", "鸡蛋"]
+  },
+  {
+    "dish_id": "D005",
+    "meal_date": "2026-06-15",
+    "meal_type": "lunch",
+    "dish_name": "宫保鸡丁",
+    "ingredients": ["鸡胸肉", "花生米", "干辣椒", "黄瓜", "大葱"],
+    "allergens_tagged": ["花生"]
+  },
+  {
+    "dish_id": "",
+    "meal_type": "dinner",
+    "dish_name": "清炒时蔬",
+    "ingredients": ["白菜", "食盐", "花生油"],
+    "allergens_tagged": []
+  },
+  {
+    "dish_id": "D007",
+    "meal_type": "breakfast",
+    "dish_name": "豆浆油条",
+    "ingredients": ["黄豆", "面粉", "食用油"],
+    "allergens_tagged": []
+  }
+]

@@ -1,0 +1,31 @@
+[
+  {
+    "complaint_id": "C20260615001",
+    "student_id": "S2023001",
+    "meal_date": "2026-06-15",
+    "meal_type": "lunch",
+    "complaint_time": "2026-06-15T12:45:00+08:00",
+    "symptoms": ["面部红肿", "呼吸困难", "全身皮疹", "疑似严重过敏反应", "已送校医室处理"],
+    "description": "午餐后30分钟出现面部红肿、呼吸困难、全身皮疹，疑似严重过敏反应，已送校医室处理",
+    "suspected_allergens": []
+  },
+  {
+    "complaint_id": "C20260615002",
+    "student_id": null,
+    "meal_date": "2026-06-15",
+    "meal_type": "lunch",
+    "complaint_time": "2026-06-15T13:10:00+08:00",
+    "symptoms": ["米饭有点硬", "希望下次煮软一些"],
+    "description": "米饭有点硬，希望下次煮软一些"
+  },
+  {
+    "complaint_id": "C20260615003",
+    "student_id": "S2022001",
+    "meal_date": "2026-06-15",
+    "meal_type": "dinner",
+    "complaint_time": "2026-06-15T19:20:00+08:00",
+    "symptoms": ["胃部轻微不适", "怀疑与奶酪有关"],
+    "description": "晚餐后胃部轻微不适，怀疑与奶酪有关",
+    "suspected_allergens": ["乳制品"]
+  }
+]
