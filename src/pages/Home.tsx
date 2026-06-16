@@ -13,13 +13,18 @@ import SnapshotPanel from '@/components/SnapshotPanel';
 import SnapshotPreviewDrawer from '@/components/SnapshotPreviewDrawer';
 import SnapshotOpLogPanel from '@/components/SnapshotOpLogPanel';
 import SnapshotConflictModal from '@/components/SnapshotConflictModal';
+import SealedConclusionPanel from '@/components/SealedConclusionPanel';
+import SealedConclusionDetailDrawer from '@/components/SealedConclusionDetailDrawer';
+import SealedConclusionConflictModal from '@/components/SealedConclusionConflictModal';
+import SealedConclusionOpLogPanel from '@/components/SealedConclusionOpLogPanel';
 import { applyFilters } from '@/utils/filters';
-import type { BoardStats, ReviewSnapshot, SnapshotConflict } from '@/types';
+import type { BoardStats, ReviewSnapshot, SnapshotConflict, SealedEventConclusion, SealedConclusionConflict } from '@/types';
 import {
   Upload,
   FileText,
   Settings2,
   Package,
+  FileCheck,
 } from 'lucide-react';
 
 export default function Home() {
@@ -39,8 +44,15 @@ export default function Home() {
   const [opLogOpen, setOpLogOpen] = useState(false);
   const [conflictSnapshot, setConflictSnapshot] = useState<ReviewSnapshot | null>(null);
   const [conflictInfo, setConflictInfo] = useState<SnapshotConflict | null>(null);
+  const [sealedConclusionOpen, setSealedConclusionOpen] = useState(false);
+  const [selectedConclusion, setSelectedConclusion] = useState<SealedEventConclusion | null>(null);
+  const [sealedConflictConclusions, setSealedConflictConclusions] = useState<SealedEventConclusion[]>([]);
+  const [sealedConflictInfo, setSealedConflictInfo] = useState<SealedConclusionConflict | null>(null);
+  const [sealedOpLogOpen, setSealedOpLogOpen] = useState(false);
 
   const importSnapshot = useBoardStore((s) => s.importSnapshot);
+  const importSealedConclusions = useBoardStore((s) => s.importSealedConclusions);
+  const sealedConclusions = useBoardStore((s) => s.sealedConclusions);
 
   const stats = useMemo<BoardStats>(() => {
     const s: BoardStats = {
@@ -99,6 +111,23 @@ export default function Home() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSealedConclusionOpen(true)}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-md border border-slate-700 px-3 py-1.5',
+                'text-sm font-medium text-slate-300 bg-slate-800/50',
+                'hover:bg-slate-800 hover:text-slate-100 transition-colors'
+              )}
+            >
+              <FileCheck className="h-4 w-4" />
+              封存结论页
+              {sealedConclusions.length > 0 && (
+                <span className="rounded-full bg-teal-500/20 text-teal-300 px-1.5 py-0.5 text-[10px]">
+                  {sealedConclusions.length}
+                </span>
+              )}
+            </button>
             <button
               type="button"
               onClick={() => setSnapshotOpen(true)}
@@ -214,6 +243,38 @@ export default function Home() {
             }
             setConflictSnapshot(null);
             setConflictInfo(null);
+          }}
+        />
+      )}
+
+      <SealedConclusionPanel
+        open={sealedConclusionOpen}
+        onClose={() => setSealedConclusionOpen(false)}
+        onViewDetail={(conc) => { setSealedConclusionOpen(false); setSelectedConclusion(conc); }}
+        onConflict={(concs, conflict) => { setSealedConflictConclusions(concs); setSealedConflictInfo(conflict); }}
+        onShowLogs={() => { setSealedConclusionOpen(false); setSealedOpLogOpen(true); }}
+      />
+
+      <SealedConclusionDetailDrawer
+        conclusion={selectedConclusion}
+        onClose={() => setSelectedConclusion(null)}
+      />
+
+      <SealedConclusionOpLogPanel
+        open={sealedOpLogOpen}
+        onClose={() => setSealedOpLogOpen(false)}
+      />
+
+      {sealedConflictConclusions.length > 0 && sealedConflictInfo && (
+        <SealedConclusionConflictModal
+          conclusions={sealedConflictConclusions}
+          conflict={sealedConflictInfo}
+          onResolve={(resolution) => {
+            if (sealedConflictConclusions.length > 0) {
+              importSealedConclusions(sealedConflictConclusions, resolution);
+            }
+            setSealedConflictConclusions([]);
+            setSealedConflictInfo(null);
           }}
         />
       )}

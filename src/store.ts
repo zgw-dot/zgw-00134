@@ -18,6 +18,11 @@ import type {
   SnapshotConflict,
   SnapshotImportResolution,
   SnapshotRestoreUndo,
+  SealedEventConclusion,
+  SealedConclusionOpLog,
+  SealedConclusionConflict,
+  SealedConclusionImportResolution,
+  SealedConclusionRestoreUndo,
 } from '@/types';
 import { generateRiskEvents } from '@/utils/engine';
 import { applyFilters } from '@/utils/filters';
@@ -46,6 +51,9 @@ interface BoardState {
   snapshots: ReviewSnapshot[];
   snapshotOpLogs: SnapshotOpLog[];
   snapshotRestoreUndo: SnapshotRestoreUndo | null;
+  sealedConclusions: SealedEventConclusion[];
+  sealedConclusionOpLogs: SealedConclusionOpLog[];
+  sealedConclusionRestoreUndo: SealedConclusionRestoreUndo | null;
 
   setAliasMap: (map: AllergenAliasMap) => { ok: boolean; errors: string[] };
   regenerateEvents: () => void;
@@ -89,6 +97,22 @@ interface BoardState {
   undoSnapshotRestore: () => boolean;
   getSnapshotOpLogs: () => SnapshotOpLog[];
   exportSnapshotsJson: (snapshotIds?: string[]) => string;
+
+  getSealedConclusions: () => SealedEventConclusion[];
+  getSealedConclusionById: (conclusionId: string) => SealedEventConclusion | undefined;
+  getSealedConclusionsBySnapshot: (snapshotId: string) => SealedEventConclusion[];
+  getSealedConclusionsByEvent: (eventId: string) => SealedEventConclusion[];
+  restoreSealedConclusion: (conclusionId: string) => boolean;
+  canUndoSealedConclusionRestore: () => boolean;
+  undoSealedConclusionRestore: () => boolean;
+  checkSealedConclusionConflict: (incomingConclusions: SealedEventConclusion[]) => SealedConclusionConflict;
+  importSealedConclusions: (
+    incomingConclusions: SealedEventConclusion[],
+    resolution: SealedConclusionImportResolution
+  ) => { ok: boolean; imported: number; skipped: number; reason?: string };
+  getSealedConclusionOpLogs: () => SealedConclusionOpLog[];
+  exportSealedConclusionsJson: (conclusionIds?: string[]) => string;
+  deleteSealedConclusion: (conclusionId: string) => void;
 }
 
 const defaultAliasMap: AllergenAliasMap = {
@@ -125,6 +149,9 @@ export const useBoardStore = create<BoardState>()(
       snapshots: [],
       snapshotOpLogs: [],
       snapshotRestoreUndo: null,
+      sealedConclusions: [],
+      sealedConclusionOpLogs: [],
+      sealedConclusionRestoreUndo: null,
 
       setAliasMap: (map: AllergenAliasMap) => {
         const errors = validateAliasMap(map as AliasMap);
@@ -475,9 +502,47 @@ export const useBoardStore = create<BoardState>()(
           timestamp: new Date().toISOString(),
           detail: `封存快照「${name}」，含 ${visibleEvents.length} 条事件`,
         };
+
+        const sealedAt = new Date().toISOString();
+        const sealedConclusions: SealedEventConclusion[] = visibleEvents.map(e => {
+          const evidenceTypes = new Set(e.evidence?.map(ev => ev.type) || []);
+          return {
+            conclusion_id: genId('conc'),
+            event_id: e.event_id,
+            snapshot_id: snapshot.snapshot_id,
+            snapshot_name: snapshot.name,
+            sealed_at: sealedAt,
+            filters_at_seal: { ...state.filters },
+            risk_level: e.risk_level,
+            status: e.status,
+            latest_note: e.latest_note || '',
+            evidence_summary: {
+              total_evidence: e.evidence?.length || 0,
+              evidence_types: Array.from(evidenceTypes),
+              student_count: e.student_ids?.length || 0,
+              canonical_allergen: e.canonical_allergen,
+              matched_aliases: [...e.matched_aliases],
+            },
+            event_snapshot: { ...e },
+          };
+        });
+
+        const sealedOpLogs: SealedConclusionOpLog[] = sealedConclusions.map(c => ({
+          id: genId('op-c'),
+          op: 'seal',
+          snapshot_id: snapshot.snapshot_id,
+          snapshot_name: snapshot.name,
+          conclusion_id: c.conclusion_id,
+          event_id: c.event_id,
+          timestamp: sealedAt,
+          detail: `封存事件 ${c.event_id.slice(0, 12)} 结论副本，风险: ${c.risk_level}, 状态: ${c.status}`,
+        }));
+
         set(s => ({
           snapshots: [...s.snapshots, snapshot],
           snapshotOpLogs: [...s.snapshotOpLogs, opLog],
+          sealedConclusions: [...s.sealedConclusions, ...sealedConclusions],
+          sealedConclusionOpLogs: [...s.sealedConclusionOpLogs, ...sealedOpLogs],
         }));
         return snapshot;
       },
@@ -634,6 +699,263 @@ export const useBoardStore = create<BoardState>()(
         };
         return JSON.stringify(exportData, null, 2);
       },
+
+      getSealedConclusions: (): SealedEventConclusion[] => {
+        return [...get().sealedConclusions];
+      },
+
+      getSealedConclusionById: (conclusionId: string): SealedEventConclusion | undefined => {
+        return get().sealedConclusions.find(c => c.conclusion_id === conclusionId);
+      },
+
+      getSealedConclusionsBySnapshot: (snapshotId: string): SealedEventConclusion[] => {
+        return get().sealedConclusions.filter(c => c.snapshot_id === snapshotId);
+      },
+
+      getSealedConclusionsByEvent: (eventId: string): SealedEventConclusion[] => {
+        return get().sealedConclusions.filter(c => c.event_id === eventId);
+      },
+
+      restoreSealedConclusion: (conclusionId: string): boolean => {
+        const state = get();
+        const conclusion = state.sealedConclusions.find(c => c.conclusion_id === conclusionId);
+        if (!conclusion) return false;
+
+        const currentEvent = state.events.find(e => e.event_id === conclusion.event_id);
+        if (!currentEvent) return false;
+
+        const restoreUndo: SealedConclusionRestoreUndo = {
+          conclusion_id: conclusionId,
+          snapshot_id: conclusion.snapshot_id,
+          event_id: conclusion.event_id,
+          event_before_restore: { ...currentEvent },
+          timestamp: new Date().toISOString(),
+        };
+
+        const opLog: SealedConclusionOpLog = {
+          id: genId('op-c'),
+          op: 'restore',
+          snapshot_id: conclusion.snapshot_id,
+          snapshot_name: conclusion.snapshot_name,
+          conclusion_id: conclusionId,
+          event_id: conclusion.event_id,
+          timestamp: new Date().toISOString(),
+          detail: `回放封存结论 ${conclusionId.slice(0, 12)} 到事件 ${conclusion.event_id.slice(0, 12)}`,
+        };
+
+        const events = state.events.map(e => {
+          if (e.event_id !== conclusion.event_id) return e;
+          return { ...conclusion.event_snapshot, updated_at: new Date().toISOString() };
+        });
+
+        set(s => ({
+          events,
+          sealedConclusionRestoreUndo: restoreUndo,
+          sealedConclusionOpLogs: [...s.sealedConclusionOpLogs, opLog],
+        }));
+        return true;
+      },
+
+      canUndoSealedConclusionRestore: (): boolean => {
+        return get().sealedConclusionRestoreUndo !== null;
+      },
+
+      undoSealedConclusionRestore: (): boolean => {
+        const state = get();
+        const undo = state.sealedConclusionRestoreUndo;
+        if (!undo) return false;
+
+        const opLog: SealedConclusionOpLog = {
+          id: genId('op-c'),
+          op: 'undo_restore',
+          snapshot_id: undo.snapshot_id,
+          snapshot_name: state.snapshots.find(s => s.snapshot_id === undo.snapshot_id)?.name || '',
+          conclusion_id: undo.conclusion_id,
+          event_id: undo.event_id,
+          timestamp: new Date().toISOString(),
+          detail: `撤销回放结论 ${undo.conclusion_id.slice(0, 12)}，还原事件 ${undo.event_id.slice(0, 12)}`,
+        };
+
+        const events = state.events.map(e => {
+          if (e.event_id !== undo.event_id) return e;
+          return { ...undo.event_before_restore, updated_at: new Date().toISOString() };
+        });
+
+        set(s => ({
+          events,
+          sealedConclusionRestoreUndo: null,
+          sealedConclusionOpLogs: [...s.sealedConclusionOpLogs, opLog],
+        }));
+        return true;
+      },
+
+      checkSealedConclusionConflict: (incomingConclusions: SealedEventConclusion[]): SealedConclusionConflict => {
+        const state = get();
+        const existingSnapshotNames = new Set(state.snapshots.map(s => s.name));
+        const existingEventIds = new Set(state.sealedConclusions.map(c => c.event_id));
+        const existingConclusionIds = new Set(state.sealedConclusions.map(c => c.conclusion_id));
+
+        const snapshot_name_conflict = incomingConclusions.some(c => existingSnapshotNames.has(c.snapshot_name));
+        const event_id_conflicts = incomingConclusions
+          .map(c => c.event_id)
+          .filter(id => existingEventIds.has(id));
+        const conclusion_id_conflicts = incomingConclusions
+          .map(c => c.conclusion_id)
+          .filter(id => existingConclusionIds.has(id));
+
+        return { snapshot_name_conflict, event_id_conflicts, conclusion_id_conflicts };
+      },
+
+      importSealedConclusions: (
+        incomingConclusions: SealedEventConclusion[],
+        resolution: SealedConclusionImportResolution
+      ): { ok: boolean; imported: number; skipped: number; reason?: string } => {
+        if (resolution === 'cancel') {
+          const cancelLogs: SealedConclusionOpLog[] = incomingConclusions.map(c => ({
+            id: genId('op-c'),
+            op: 'cancel_import',
+            snapshot_id: c.snapshot_id,
+            snapshot_name: c.snapshot_name,
+            conclusion_id: c.conclusion_id,
+            event_id: c.event_id,
+            timestamp: new Date().toISOString(),
+            detail: `用户取消导入结论 ${c.conclusion_id.slice(0, 12)}`,
+          }));
+          set(s => ({
+            sealedConclusionOpLogs: [...s.sealedConclusionOpLogs, ...cancelLogs],
+          }));
+          return { ok: false, imported: 0, skipped: incomingConclusions.length, reason: '用户取消导入' };
+        }
+
+        const state = get();
+        const existingConclusionIds = new Set(state.sealedConclusions.map(c => c.conclusion_id));
+        const existingEventSnapshotMap = new Map(state.sealedConclusions.map(c => [`${c.snapshot_id}-${c.event_id}`, c]));
+
+        let imported = 0;
+        let skipped = 0;
+        const toAdd: SealedEventConclusion[] = [];
+        const opLogs: SealedConclusionOpLog[] = [];
+        const now = new Date().toISOString();
+
+        for (const incoming of incomingConclusions) {
+          const key = `${incoming.snapshot_id}-${incoming.event_id}`;
+          const existing = existingEventSnapshotMap.get(key);
+
+          if (existing && resolution === 'skip') {
+            skipped++;
+            continue;
+          }
+
+          if (existing && resolution === 'overwrite') {
+            toAdd.push({
+              ...incoming,
+              conclusion_id: existing.conclusion_id,
+            });
+            opLogs.push({
+              id: genId('op-c'),
+              op: 'overwrite',
+              snapshot_id: incoming.snapshot_id,
+              snapshot_name: incoming.snapshot_name,
+              conclusion_id: existing.conclusion_id,
+              event_id: incoming.event_id,
+              timestamp: now,
+              detail: `覆盖结论 ${existing.conclusion_id.slice(0, 12)} (事件 ${incoming.event_id.slice(0, 12)})`,
+            });
+            imported++;
+          } else if (existing && resolution === 'copy') {
+            const baseName = incoming.snapshot_name;
+            const existingNames = new Set(state.snapshots.map(s => s.name));
+            let finalName = baseName;
+            let suffix = 1;
+            while (existingNames.has(finalName)) {
+              finalName = `${baseName} (${suffix})`;
+              suffix++;
+            }
+            toAdd.push({
+              ...incoming,
+              conclusion_id: genId('conc'),
+              snapshot_name: finalName,
+            });
+            opLogs.push({
+              id: genId('op-c'),
+              op: 'copy',
+              snapshot_id: incoming.snapshot_id,
+              snapshot_name: finalName,
+              conclusion_id: toAdd[toAdd.length - 1].conclusion_id,
+              event_id: incoming.event_id,
+              timestamp: now,
+              detail: `另存结论副本 ${finalName} (事件 ${incoming.event_id.slice(0, 12)})`,
+            });
+            imported++;
+          } else {
+            const newId = existingConclusionIds.has(incoming.conclusion_id)
+              ? genId('conc')
+              : incoming.conclusion_id;
+            toAdd.push({
+              ...incoming,
+              conclusion_id: newId,
+            });
+            opLogs.push({
+              id: genId('op-c'),
+              op: 'import',
+              snapshot_id: incoming.snapshot_id,
+              snapshot_name: incoming.snapshot_name,
+              conclusion_id: newId,
+              event_id: incoming.event_id,
+              timestamp: now,
+              detail: `导入结论 ${newId.slice(0, 12)} (事件 ${incoming.event_id.slice(0, 12)})`,
+            });
+            imported++;
+          }
+        }
+
+        if (toAdd.length > 0) {
+          const existingIdsToRemove = new Set(
+            toAdd.filter(c => existingConclusionIds.has(c.conclusion_id)).map(c => c.conclusion_id)
+          );
+          set(s => ({
+            sealedConclusions: [
+              ...s.sealedConclusions.filter(c => !existingIdsToRemove.has(c.conclusion_id)),
+              ...toAdd,
+            ],
+            sealedConclusionOpLogs: [...s.sealedConclusionOpLogs, ...opLogs],
+          }));
+        }
+
+        return { ok: true, imported, skipped };
+      },
+
+      getSealedConclusionOpLogs: (): SealedConclusionOpLog[] => {
+        return [...get().sealedConclusionOpLogs].reverse();
+      },
+
+      exportSealedConclusionsJson: (conclusionIds?: string[]): string => {
+        const state = get();
+        const toExport = conclusionIds
+          ? state.sealedConclusions.filter(c => conclusionIds.includes(c.conclusion_id))
+          : state.sealedConclusions;
+
+        const relatedSnapshotIds = new Set(toExport.map(c => c.snapshot_id));
+        const relatedSnapshots = state.snapshots.filter(s => relatedSnapshotIds.has(s.snapshot_id));
+
+        const exportData = {
+          _type: 'sealed-conclusion-package',
+          _version: 1,
+          exported_at: new Date().toISOString(),
+          conclusions: toExport,
+          snapshots: relatedSnapshots,
+          op_logs: state.sealedConclusionOpLogs.filter(l =>
+            toExport.some(c => c.conclusion_id === l.conclusion_id)
+          ),
+        };
+        return JSON.stringify(exportData, null, 2);
+      },
+
+      deleteSealedConclusion: (conclusionId: string) => {
+        set(s => ({
+          sealedConclusions: s.sealedConclusions.filter(c => c.conclusion_id !== conclusionId),
+        }));
+      },
     }),
     {
       name: 'allergy-board-store',
@@ -651,6 +973,9 @@ export const useBoardStore = create<BoardState>()(
         snapshots: state.snapshots,
         snapshotOpLogs: state.snapshotOpLogs,
         snapshotRestoreUndo: state.snapshotRestoreUndo,
+        sealedConclusions: state.sealedConclusions,
+        sealedConclusionOpLogs: state.sealedConclusionOpLogs,
+        sealedConclusionRestoreUndo: state.sealedConclusionRestoreUndo,
       }),
       onRehydrateStorage: () => (state) => {
         if (state) {

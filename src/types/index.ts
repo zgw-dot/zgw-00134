@@ -164,3 +164,52 @@ export interface SnapshotRestoreUndo {
   filters_before_restore: FilterState;
   timestamp: string;
 }
+
+export interface SealedEventConclusion {
+  conclusion_id: string;
+  event_id: string;
+  snapshot_id: string;
+  snapshot_name: string;
+  sealed_at: string;
+  filters_at_seal: FilterState;
+  risk_level: RiskLevel;
+  status: EventStatus;
+  latest_note: string;
+  evidence_summary: {
+    total_evidence: number;
+    evidence_types: EvidenceLink['type'][];
+    student_count: number;
+    canonical_allergen: string;
+    matched_aliases: string[];
+  };
+  event_snapshot: RiskEvent;
+}
+
+export interface SealedConclusionRestoreUndo {
+  conclusion_id: string;
+  snapshot_id: string;
+  event_id: string;
+  event_before_restore: RiskEvent;
+  timestamp: string;
+}
+
+export type SealedConclusionOpType = 'seal' | 'import' | 'overwrite' | 'copy' | 'skip' | 'restore' | 'undo_restore' | 'cancel_import';
+
+export interface SealedConclusionOpLog {
+  id: string;
+  op: SealedConclusionOpType;
+  snapshot_id: string;
+  snapshot_name: string;
+  conclusion_id?: string;
+  event_id?: string;
+  timestamp: string;
+  detail: string;
+}
+
+export interface SealedConclusionConflict {
+  snapshot_name_conflict: boolean;
+  event_id_conflicts: string[];
+  conclusion_id_conflicts: string[];
+}
+
+export type SealedConclusionImportResolution = 'overwrite' | 'copy' | 'skip' | 'cancel';
