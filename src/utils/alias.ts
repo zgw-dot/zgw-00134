@@ -90,14 +90,6 @@ export function validateAliasMap(map: AliasMap): AliasValidationError[] {
       if (!normalizedAlias) {
         continue;
       }
-      if (normalizedAlias === normalizedStandard) {
-        errors.push({
-          type: 'circular_reference',
-          message: `标准名 "${trimmedStandard}" 的别名包含自身`,
-          standardName: trimmedStandard,
-          alias: rawAlias,
-        });
-      }
       if (aliasToStandard[normalizedStandard] && aliasToStandard[normalizedStandard] !== trimmedStandard) {
         errors.push({
           type: 'circular_reference',

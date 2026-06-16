@@ -7,7 +7,7 @@
     "complaint_time": "2026-06-15T12:45:00+08:00",
     "symptoms": ["面部红肿", "呼吸困难", "全身皮疹", "疑似严重过敏反应", "已送校医室处理"],
     "description": "午餐后30分钟出现面部红肿、呼吸困难、全身皮疹，疑似严重过敏反应，已送校医室处理",
-    "suspected_allergens": []
+    "suspected_allergens": ["花生"]
   },
   {
     "complaint_id": "C20260615002",

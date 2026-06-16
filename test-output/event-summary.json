@@ -1,0 +1,98 @@
+[
+  {
+    "event_id": "evt_be04bc64",
+    "canonical_allergen": "花生",
+    "risk_level": "medium",
+    "status": "pending",
+    "meal_type": "breakfast",
+    "student_names": [
+      "张小明"
+    ],
+    "class_names": [
+      "三年级(1)班"
+    ],
+    "evidence_count": 3,
+    "review_log_count": 0,
+    "closed_at": null
+  },
+  {
+    "event_id": "evt_054252c8",
+    "canonical_allergen": "花生",
+    "risk_level": "high",
+    "status": "closed",
+    "meal_type": "lunch",
+    "student_names": [
+      "张小明"
+    ],
+    "class_names": [
+      "三年级(1)班"
+    ],
+    "evidence_count": 4,
+    "review_log_count": 2,
+    "closed_at": "2026-06-15T23:45:02.358Z"
+  },
+  {
+    "event_id": "evt_de97f93e",
+    "canonical_allergen": "甲壳类",
+    "risk_level": "medium",
+    "status": "pending",
+    "meal_type": "lunch",
+    "student_names": [
+      "王小刚"
+    ],
+    "class_names": [
+      "三年级(2)班"
+    ],
+    "evidence_count": 3,
+    "review_log_count": 0,
+    "closed_at": null
+  },
+  {
+    "event_id": "evt_715f26cc",
+    "canonical_allergen": "鸡蛋",
+    "risk_level": "medium",
+    "status": "pending",
+    "meal_type": "dinner",
+    "student_names": [
+      "张小明"
+    ],
+    "class_names": [
+      "三年级(1)班"
+    ],
+    "evidence_count": 3,
+    "review_log_count": 0,
+    "closed_at": null
+  },
+  {
+    "event_id": "evt_7bc56445",
+    "canonical_allergen": "大豆",
+    "risk_level": "low",
+    "status": "pending",
+    "meal_type": "dinner",
+    "student_names": [
+      "孙小伟"
+    ],
+    "class_names": [
+      "四年级(3)班"
+    ],
+    "evidence_count": 3,
+    "review_log_count": 0,
+    "closed_at": null
+  },
+  {
+    "event_id": "evt_fc197a76",
+    "canonical_allergen": "乳制品",
+    "risk_level": "medium",
+    "status": "pending",
+    "meal_type": "dinner",
+    "student_names": [
+      "赵小美"
+    ],
+    "class_names": [
+      "四年级(3)班"
+    ],
+    "evidence_count": 2,
+    "review_log_count": 0,
+    "closed_at": null
+  }
+]

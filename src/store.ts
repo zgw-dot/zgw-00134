@@ -216,7 +216,7 @@ export const useBoardStore = create<BoardState>()(
             break;
         }
 
-        if (errors.length > 0) {
+        if (valid.length === 0) {
           return { ok: false, errors, imported: 0 };
         }
 

@@ -14,7 +14,20 @@ const DATE_FORMAT_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 function isIsoDate(str: string): boolean {
   if (!str) return false;
   const d = new Date(str);
-  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === str.slice(0, 10);
+  if (isNaN(d.getTime())) return false;
+  const inputDate = str.replace(/[Tt ].*/, '').slice(0, 10);
+  if (!DATE_FORMAT_REGEX.test(inputDate)) return false;
+  const tzMatch = str.match(/([+-]\d{2}):?(\d{2})$/);
+  if (tzMatch) {
+    const tzHours = parseInt(tzMatch[1], 10);
+    const tzMinutes = parseInt(tzMatch[2], 10);
+    const tzOffset = tzHours * 60 + (tzHours >= 0 ? tzMinutes : -tzMinutes);
+    const utcMinutes = d.getTime() / 60000;
+    const localMinutes = utcMinutes + tzOffset;
+    const localDate = new Date(localMinutes * 60000).toISOString().slice(0, 10);
+    return localDate === inputDate;
+  }
+  return d.toISOString().slice(0, 10) === inputDate;
 }
 
 function toArray(value: any): string[] {

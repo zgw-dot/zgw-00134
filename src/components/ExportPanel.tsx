@@ -23,6 +23,15 @@ const CSV_FIELDS: (string | CSVField)[] = [
   { key: 'student_ids', label: '学生ID' },
   { key: 'class_names', label: '班级' },
   { key: 'latest_note', label: '最新备注' },
+  { key: 'evidence_count', label: '证据总数' },
+  { key: 'evidence_menu_count', label: '菜单证据数' },
+  { key: 'evidence_profile_count', label: '档案证据数' },
+  { key: 'evidence_pickup_count', label: '领餐证据数' },
+  { key: 'evidence_complaint_count', label: '投诉证据数' },
+  { key: 'evidence', label: '证据明细(JSON)' },
+  { key: 'review_log_count', label: '复核日志数' },
+  { key: 'review_logs', label: '复核日志(JSON)' },
+  { key: 'closed_at', label: '关闭时间' },
   { key: 'created_at', label: '创建时间' },
   { key: 'updated_at', label: '更新时间' },
 ];
@@ -66,6 +75,14 @@ export default function ExportPanel() {
       student_ids: e.student_ids?.join('、') || '',
       class_names: e.class_names?.join('、') || '',
       matched_aliases: e.matched_aliases?.join('、') || '',
+      evidence_count: e.evidence?.length || 0,
+      evidence_menu_count: e.evidence?.filter(ev => ev.type === 'menu').length || 0,
+      evidence_profile_count: e.evidence?.filter(ev => ev.type === 'profile').length || 0,
+      evidence_pickup_count: e.evidence?.filter(ev => ev.type === 'pickup').length || 0,
+      evidence_complaint_count: e.evidence?.filter(ev => ev.type === 'complaint').length || 0,
+      evidence: typeof e.evidence === 'object' ? JSON.stringify(e.evidence) : '',
+      review_log_count: e.review_logs?.length || 0,
+      review_logs: typeof e.review_logs === 'object' ? JSON.stringify(e.review_logs) : '',
     }));
 
     const blob =
