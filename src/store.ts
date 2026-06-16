@@ -13,6 +13,11 @@ import type {
   EventStatus,
   BatchUpdateResult,
   UndoSnapshot,
+  ReviewSnapshot,
+  SnapshotOpLog,
+  SnapshotConflict,
+  SnapshotImportResolution,
+  SnapshotRestoreUndo,
 } from '@/types';
 import { generateRiskEvents } from '@/utils/engine';
 import { applyFilters } from '@/utils/filters';
@@ -38,6 +43,9 @@ interface BoardState {
   selectedEventId: string | null;
   selectedEventIds: Set<string>;
   undoSnapshot: UndoSnapshot | null;
+  snapshots: ReviewSnapshot[];
+  snapshotOpLogs: SnapshotOpLog[];
+  snapshotRestoreUndo: SnapshotRestoreUndo | null;
 
   setAliasMap: (map: AllergenAliasMap) => { ok: boolean; errors: string[] };
   regenerateEvents: () => void;
@@ -71,6 +79,16 @@ interface BoardState {
     rows: any[]
   ) => { ok: boolean; errors: string[]; imported: number };
   clearAllData: () => void;
+
+  sealSnapshot: (name: string) => ReviewSnapshot;
+  deleteSnapshot: (snapshotId: string) => void;
+  checkSnapshotConflict: (incoming: ReviewSnapshot) => SnapshotConflict;
+  importSnapshot: (incoming: ReviewSnapshot, resolution: SnapshotImportResolution) => { ok: boolean; reason?: string };
+  restoreSnapshot: (snapshotId: string) => boolean;
+  canUndoSnapshotRestore: () => boolean;
+  undoSnapshotRestore: () => boolean;
+  getSnapshotOpLogs: () => SnapshotOpLog[];
+  exportSnapshotsJson: (snapshotIds?: string[]) => string;
 }
 
 const defaultAliasMap: AllergenAliasMap = {
@@ -104,6 +122,9 @@ export const useBoardStore = create<BoardState>()(
       selectedEventId: null,
       selectedEventIds: new Set(),
       undoSnapshot: null,
+      snapshots: [],
+      snapshotOpLogs: [],
+      snapshotRestoreUndo: null,
 
       setAliasMap: (map: AllergenAliasMap) => {
         const errors = validateAliasMap(map as AliasMap);
@@ -424,7 +445,194 @@ export const useBoardStore = create<BoardState>()(
           selectedEventId: null,
           selectedEventIds: new Set(),
           undoSnapshot: null,
+          snapshotRestoreUndo: null,
         });
+      },
+
+      sealSnapshot: (name: string): ReviewSnapshot => {
+        const state = get();
+        const visibleEvents = state.getVisibleEvents();
+        const risk_stats = { high: 0, medium: 0, low: 0 };
+        for (const e of visibleEvents) {
+          if (e.risk_level === 'high') risk_stats.high++;
+          else if (e.risk_level === 'medium') risk_stats.medium++;
+          else if (e.risk_level === 'low') risk_stats.low++;
+        }
+        const snapshot: ReviewSnapshot = {
+          snapshot_id: genId('snap'),
+          name,
+          created_at: new Date().toISOString(),
+          filters: { ...state.filters },
+          events: visibleEvents.map(e => ({ ...e })),
+          risk_stats,
+          import_batches: state.importBatches.map(b => ({ ...b })),
+        };
+        const opLog: SnapshotOpLog = {
+          id: genId('op'),
+          op: 'seal',
+          snapshot_id: snapshot.snapshot_id,
+          snapshot_name: snapshot.name,
+          timestamp: new Date().toISOString(),
+          detail: `封存快照「${name}」，含 ${visibleEvents.length} 条事件`,
+        };
+        set(s => ({
+          snapshots: [...s.snapshots, snapshot],
+          snapshotOpLogs: [...s.snapshotOpLogs, opLog],
+        }));
+        return snapshot;
+      },
+
+      deleteSnapshot: (snapshotId: string) => {
+        set(s => ({
+          snapshots: s.snapshots.filter(snap => snap.snapshot_id !== snapshotId),
+        }));
+      },
+
+      checkSnapshotConflict: (incoming: ReviewSnapshot): SnapshotConflict => {
+        const state = get();
+        const name_conflict = state.snapshots.some(s => s.name === incoming.name);
+        const existingEventIds = new Set(state.snapshots.flatMap(s => s.events.map(e => e.event_id)));
+        const event_id_conflicts = incoming.events
+          .map(e => e.event_id)
+          .filter(id => existingEventIds.has(id));
+        return { name_conflict, event_id_conflicts };
+      },
+
+      importSnapshot: (incoming: ReviewSnapshot, resolution: SnapshotImportResolution): { ok: boolean; reason?: string } => {
+        if (resolution === 'cancel') {
+          return { ok: false, reason: '用户取消导入' };
+        }
+        const state = get();
+
+        if (resolution === 'overwrite') {
+          const overwritten = state.snapshots.find(s => s.name === incoming.name);
+          const filtered = state.snapshots.filter(s => s.name !== incoming.name);
+          const toAdd = { ...incoming };
+          const opLog: SnapshotOpLog = {
+            id: genId('op'),
+            op: 'overwrite',
+            snapshot_id: incoming.snapshot_id,
+            snapshot_name: incoming.name,
+            timestamp: new Date().toISOString(),
+            detail: overwritten
+              ? `覆盖快照「${incoming.name}」(原ID: ${overwritten.snapshot_id})`
+              : `导入并覆盖快照「${incoming.name}」`,
+          };
+          set(s => ({
+            snapshots: [...filtered, toAdd],
+            snapshotOpLogs: [...s.snapshotOpLogs, opLog],
+          }));
+          return { ok: true };
+        }
+
+        if (resolution === 'copy') {
+          const baseName = incoming.name;
+          const existingNames = new Set(state.snapshots.map(s => s.name));
+          let finalName = baseName;
+          let suffix = 1;
+          while (existingNames.has(finalName)) {
+            finalName = `${baseName} (${suffix})`;
+            suffix++;
+          }
+          const copy: ReviewSnapshot = {
+            ...incoming,
+            snapshot_id: genId('snap'),
+            name: finalName,
+          };
+          const opLog: SnapshotOpLog = {
+            id: genId('op'),
+            op: 'import',
+            snapshot_id: copy.snapshot_id,
+            snapshot_name: copy.name,
+            timestamp: new Date().toISOString(),
+            detail: `另存快照副本「${finalName}」(原始名: ${baseName})`,
+          };
+          set(s => ({
+            snapshots: [...s.snapshots, copy],
+            snapshotOpLogs: [...s.snapshotOpLogs, opLog],
+          }));
+          return { ok: true };
+        }
+
+        return { ok: false, reason: '未知操作' };
+      },
+
+      restoreSnapshot: (snapshotId: string): boolean => {
+        const state = get();
+        const snapshot = state.snapshots.find(s => s.snapshot_id === snapshotId);
+        if (!snapshot) return false;
+
+        const restoreUndo: SnapshotRestoreUndo = {
+          snapshot_id: snapshotId,
+          events_before_restore: state.events.map(e => ({ ...e })),
+          filters_before_restore: { ...state.filters },
+          timestamp: new Date().toISOString(),
+        };
+
+        const opLog: SnapshotOpLog = {
+          id: genId('op'),
+          op: 'restore',
+          snapshot_id: snapshotId,
+          snapshot_name: snapshot.name,
+          timestamp: new Date().toISOString(),
+          detail: `恢复快照「${snapshot.name}」到主看板，${snapshot.events.length} 条事件`,
+        };
+
+        set({
+          events: snapshot.events.map(e => ({ ...e })),
+          filters: { ...snapshot.filters },
+          snapshotRestoreUndo: restoreUndo,
+          snapshotOpLogs: [...state.snapshotOpLogs, opLog],
+        });
+        return true;
+      },
+
+      canUndoSnapshotRestore: (): boolean => {
+        return get().snapshotRestoreUndo !== null;
+      },
+
+      undoSnapshotRestore: (): boolean => {
+        const state = get();
+        const undo = state.snapshotRestoreUndo;
+        if (!undo) return false;
+
+        const opLog: SnapshotOpLog = {
+          id: genId('op'),
+          op: 'undo_restore',
+          snapshot_id: undo.snapshot_id,
+          snapshot_name: state.snapshots.find(s => s.snapshot_id === undo.snapshot_id)?.name || '',
+          timestamp: new Date().toISOString(),
+          detail: '撤销快照恢复，还原到恢复前状态',
+        };
+
+        set(s => ({
+          events: undo.events_before_restore,
+          filters: undo.filters_before_restore,
+          snapshotRestoreUndo: null,
+          snapshotOpLogs: [...s.snapshotOpLogs, opLog],
+        }));
+        return true;
+      },
+
+      getSnapshotOpLogs: (): SnapshotOpLog[] => {
+        return [...get().snapshotOpLogs].reverse();
+      },
+
+      exportSnapshotsJson: (snapshotIds?: string[]): string => {
+        const state = get();
+        const toExport = snapshotIds
+          ? state.snapshots.filter(s => snapshotIds.includes(s.snapshot_id))
+          : state.snapshots;
+        const exportData = {
+          _type: 'review-snapshot-package',
+          _version: 1,
+          exported_at: new Date().toISOString(),
+          snapshots: toExport,
+          op_logs: state.snapshotOpLogs.filter(l =>
+            toExport.some(s => s.snapshot_id === l.snapshot_id)
+          ),
+        };
+        return JSON.stringify(exportData, null, 2);
       },
     }),
     {
@@ -440,6 +648,9 @@ export const useBoardStore = create<BoardState>()(
         filters: state.filters,
         selectedEventIds: Array.from(state.selectedEventIds),
         undoSnapshot: state.undoSnapshot,
+        snapshots: state.snapshots,
+        snapshotOpLogs: state.snapshotOpLogs,
+        snapshotRestoreUndo: state.snapshotRestoreUndo,
       }),
       onRehydrateStorage: () => (state) => {
         if (state) {

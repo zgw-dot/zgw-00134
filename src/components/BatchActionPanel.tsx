@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useBoardStore } from '@/store';
 import { cn } from '@/lib/utils';
+import { applyFilters } from '@/utils/filters';
 import type { EventStatus, BatchUpdateResult } from '@/types';
 import {
   CheckSquare,
@@ -130,7 +131,8 @@ function ResultToast({ result, onClose, onUndo }: ResultToastProps) {
 
 export default function BatchActionPanel() {
   const selectedEventIds = useBoardStore((s) => s.selectedEventIds);
-  const visibleEvents = useBoardStore((s) => s.getVisibleEvents());
+  const events = useBoardStore((s) => s.events);
+  const filters = useBoardStore((s) => s.filters);
   const toggleSelectAllVisible = useBoardStore((s) => s.toggleSelectAllVisible);
   const clearSelection = useBoardStore((s) => s.clearSelection);
   const getSelectedEvents = useBoardStore((s) => s.getSelectedEvents);
@@ -149,6 +151,10 @@ export default function BatchActionPanel() {
     note: string;
   } | null>(null);
   const [showResult, setShowResult] = useState<BatchUpdateResult | null>(null);
+
+  const visibleEvents = useMemo(() => {
+    return applyFilters(events, filters).filter(e => !(e as any).hidden);
+  }, [events, filters]);
 
   const selectedCount = selectedEventIds.size;
   const visibleCount = visibleEvents.length;

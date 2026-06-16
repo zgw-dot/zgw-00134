@@ -129,3 +129,38 @@ export interface UndoSnapshot {
   events: RiskEvent[];
   description: string;
 }
+
+export interface ReviewSnapshot {
+  snapshot_id: string;
+  name: string;
+  created_at: string;
+  filters: FilterState;
+  events: RiskEvent[];
+  risk_stats: { high: number; medium: number; low: number };
+  import_batches: ImportBatch[];
+}
+
+export type SnapshotOpType = 'seal' | 'import' | 'overwrite' | 'restore' | 'undo_restore';
+
+export interface SnapshotOpLog {
+  id: string;
+  op: SnapshotOpType;
+  snapshot_id: string;
+  snapshot_name: string;
+  timestamp: string;
+  detail: string;
+}
+
+export interface SnapshotConflict {
+  name_conflict: boolean;
+  event_id_conflicts: string[];
+}
+
+export type SnapshotImportResolution = 'overwrite' | 'copy' | 'cancel';
+
+export interface SnapshotRestoreUndo {
+  snapshot_id: string;
+  events_before_restore: RiskEvent[];
+  filters_before_restore: FilterState;
+  timestamp: string;
+}

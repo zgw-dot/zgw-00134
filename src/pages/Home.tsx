@@ -9,12 +9,17 @@ import ImportModal from '@/components/ImportModal';
 import ExportPanel from '@/components/ExportPanel';
 import AliasModal from '@/components/AliasModal';
 import BatchActionPanel from '@/components/BatchActionPanel';
+import SnapshotPanel from '@/components/SnapshotPanel';
+import SnapshotPreviewDrawer from '@/components/SnapshotPreviewDrawer';
+import SnapshotOpLogPanel from '@/components/SnapshotOpLogPanel';
+import SnapshotConflictModal from '@/components/SnapshotConflictModal';
 import { applyFilters } from '@/utils/filters';
-import type { BoardStats } from '@/types';
+import type { BoardStats, ReviewSnapshot, SnapshotConflict } from '@/types';
 import {
   Upload,
   FileText,
   Settings2,
+  Package,
 } from 'lucide-react';
 
 export default function Home() {
@@ -29,6 +34,13 @@ export default function Home() {
 
   const [importOpen, setImportOpen] = useState(false);
   const [aliasOpen, setAliasOpen] = useState(false);
+  const [snapshotOpen, setSnapshotOpen] = useState(false);
+  const [previewSnapshot, setPreviewSnapshot] = useState<ReviewSnapshot | null>(null);
+  const [opLogOpen, setOpLogOpen] = useState(false);
+  const [conflictSnapshot, setConflictSnapshot] = useState<ReviewSnapshot | null>(null);
+  const [conflictInfo, setConflictInfo] = useState<SnapshotConflict | null>(null);
+
+  const importSnapshot = useBoardStore((s) => s.importSnapshot);
 
   const stats = useMemo<BoardStats>(() => {
     const s: BoardStats = {
@@ -87,6 +99,18 @@ export default function Home() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSnapshotOpen(true)}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-md border border-slate-700 px-3 py-1.5',
+                'text-sm font-medium text-slate-300 bg-slate-800/50',
+                'hover:bg-slate-800 hover:text-slate-100 transition-colors'
+              )}
+            >
+              <Package className="h-4 w-4" />
+              快照包
+            </button>
             <button
               type="button"
               onClick={() => setAliasOpen(true)}
@@ -161,6 +185,38 @@ export default function Home() {
         initialMap={aliasMap}
         onSave={setAliasMap}
       />
+
+      <SnapshotPanel
+        open={snapshotOpen}
+        onClose={() => setSnapshotOpen(false)}
+        onPreview={(snap) => { setSnapshotOpen(false); setPreviewSnapshot(snap); }}
+        onConflict={(snap, conflict) => { setConflictSnapshot(snap); setConflictInfo(conflict); }}
+        onShowLogs={() => { setSnapshotOpen(false); setOpLogOpen(true); }}
+      />
+
+      <SnapshotPreviewDrawer
+        snapshot={previewSnapshot}
+        onClose={() => setPreviewSnapshot(null)}
+      />
+
+      <SnapshotOpLogPanel
+        open={opLogOpen}
+        onClose={() => setOpLogOpen(false)}
+      />
+
+      {conflictSnapshot && conflictInfo && (
+        <SnapshotConflictModal
+          snapshot={conflictSnapshot}
+          conflict={conflictInfo}
+          onResolve={(resolution) => {
+            if (conflictSnapshot) {
+              importSnapshot(conflictSnapshot, resolution);
+            }
+            setConflictSnapshot(null);
+            setConflictInfo(null);
+          }}
+        />
+      )}
     </div>
   );
 }
