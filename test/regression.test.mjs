@@ -789,6 +789,7 @@ function createBatchStore(initialEvents) {
     getEvents: () => events,
     getSelectedIds: () => selectedEventIds,
     getUndoSnapshot: () => undoSnapshot,
+    restoreUndoSnapshot: (snap) => { undoSnapshot = snap; },
 
     toggleEventSelection: (eventId) => {
       if (selectedEventIds.has(eventId)) {
@@ -873,7 +874,22 @@ function createBatchStore(initialEvents) {
     undoLastBatch: () => {
       if (!undoSnapshot) return false;
       const snapshotMap = new Map(undoSnapshot.events.map(e => [e.event_id, e]));
-      events = events.map(e => snapshotMap.get(e.event_id) || e);
+      events = events.map(e => {
+        const original = snapshotMap.get(e.event_id);
+        if (!original) return e;
+        const undoLog = {
+          id: genId(),
+          timestamp: new Date().toISOString(),
+          from_status: e.status,
+          to_status: original.status,
+          note: `撤销批量操作: ${undoSnapshot.description}`,
+        };
+        return {
+          ...original,
+          review_logs: [...e.review_logs, undoLog],
+          updated_at: new Date().toISOString(),
+        };
+      });
       undoSnapshot = null;
       return true;
     },
@@ -1095,9 +1111,13 @@ test('撤销功能: 批量更新后可撤销，恢复原始状态', () => {
   for (let i = 0; i < beforeUpdate.length; i++) {
     assertEq(afterUndo[i].status, beforeUpdate[i].status, `事件${i}状态应恢复`);
     assertEq(afterUndo[i].latest_note, beforeUpdate[i].latest_note, `事件${i}备注应恢复`);
-    assertEq(afterUndo[i].review_logs.length, beforeUpdate[i].review_logs.length, `事件${i}日志应恢复`);
+    assertEq(afterUndo[i].review_logs.length, beforeUpdate[i].review_logs.length + 2, `事件${i}日志应为原始+批量+撤销`);
+    const lastLog = afterUndo[i].review_logs[afterUndo[i].review_logs.length - 1];
+    assert(lastLog.note.includes('撤销批量操作'), `事件${i}最后一条日志应为撤销记录`);
+    assertEq(lastLog.from_status, 'closed', `事件${i}撤销日志from_status应为closed`);
+    assertEq(lastLog.to_status, beforeUpdate[i].status, `事件${i}撤销日志to_status应为原始状态`);
   }
-  console.log(`     撤销成功，${afterUndo.length} 条事件全部恢复原始状态`);
+  console.log(`     撤销成功，${afterUndo.length} 条事件全部恢复原始状态，每条追加撤销日志`);
 });
 
 test('撤销功能: 无操作时不可撤销', () => {
@@ -1165,11 +1185,7 @@ test('持久化: 页面刷新后撤销仍可用（模拟localStorage）', () => 
   const persistedEvents = JSON.parse(JSON.stringify(store1.getEvents()));
 
   const store2 = createBatchStore(persistedEvents);
-  store2._restoreUndoSnapshot = (snap) => {
-    store2.getUndoSnapshot = () => snap;
-    store2.canUndo = () => snap !== null;
-  };
-  store2._restoreUndoSnapshot(persistedSnapshot);
+  store2.restoreUndoSnapshot(persistedSnapshot);
 
   assert(store2.canUndo(), '刷新后仍可撤销');
   const undoSuccess = store2.undoLastBatch();
@@ -1237,12 +1253,164 @@ test('筛选导出: 导出数据不包含历史旧状态', () => {
   console.log(`     两次操作后导出：status=${exportEvent.status}，note="${exportEvent.latest_note}"，日志数=${exportEvent.review_logs.length}`);
 });
 
+// ========== 回归验证：批量复核完整链路 ==========
+
+console.log('\n--- 回归验证7: 多选 → 批量状态+备注 → 保留原有数据 ---');
+test('回归-多选: 多选后批量更新状态和备注，每条原有 latest_note/review_logs/closed_at 不被覆盖', () => {
+  const eventsWithHistory = batchTestEvents.map((e, idx) => {
+    if (idx < 3) {
+      return {
+        ...e,
+        status: 'confirmed',
+        latest_note: '原有重要备注',
+        review_logs: [{
+          id: genId(),
+          timestamp: new Date(Date.now() - 7200000).toISOString(),
+          from_status: 'pending',
+          to_status: 'confirmed',
+          note: '历史确认操作',
+        }],
+        closed_at: undefined,
+      };
+    }
+    return e;
+  });
+
+  const store = createBatchStore(eventsWithHistory);
+  const targetIds = eventsWithHistory.slice(0, 3).map(e => e.event_id);
+
+  for (const id of targetIds) store.toggleEventSelection(id);
+  const result = store.batchUpdateEvents(targetIds, 'closed', '批量关闭');
+
+  assertEq(result.updated.length, 3, '应更新3条');
+
+  const updatedEvents = store.getEvents().filter(e => targetIds.includes(e.event_id));
+  for (const e of updatedEvents) {
+    assertEq(e.status, 'closed', '状态应为closed');
+    assertEq(e.latest_note, '批量关闭', '备注应为新备注');
+    assert(e.closed_at, '应有closed_at');
+    assertEq(e.review_logs.length, 2, '应有 历史1条+批量1条=2条');
+    assert(e.review_logs[0].note === '历史确认操作', '第1条为历史日志');
+    assert(e.review_logs[1].note === '批量关闭', '最后1条为批量日志');
+  }
+  console.log(`     批量更新3条，每条保留3条日志，latest_note更新，closed_at正确设置`);
+});
+
+console.log('\n--- 回归验证8: 已关闭事件冲突提示 → 可继续或拦截 ---');
+test('回归-冲突: 已关闭事件参与批量时返回冲突，forceClosed=true可强制更新，forceClosed=false拦截', () => {
+  const eventsMixed = batchTestEvents.map((e, idx) => {
+    if (idx === 0) return { ...e, status: 'closed', closed_at: '2024-06-01T00:00:00.000Z' };
+    if (idx === 1) return { ...e, status: 'confirmed' };
+    return e;
+  });
+
+  const store = createBatchStore(eventsMixed);
+  const targetIds = [eventsMixed[0].event_id, eventsMixed[1].event_id];
+
+  for (const id of targetIds) store.toggleEventSelection(id);
+
+  const closed = store.getClosedInSelection();
+  assertEq(closed.length, 1, '应检测到1条已关闭');
+
+  const blocked = store.batchUpdateEvents(targetIds, 'confirmed', '尝试更新', false);
+  assertEq(blocked.conflicts.length, 1, '不强制时应返回冲突');
+  assertEq(blocked.skipped.length, 1, '已关闭事件应被跳过');
+  assertEq(blocked.updated.length, 1, '只更新非关闭事件');
+
+  const forced = store.batchUpdateEvents(targetIds, 'confirmed', '强制更新', true);
+  assertEq(forced.conflicts.length, 0, '强制时不应有冲突');
+  assertEq(forced.updated.length, 2, '强制时应更新全部');
+  console.log(`     不强制: 冲突${blocked.conflicts.length} 跳过${blocked.skipped.length} 更新${blocked.updated.length}；强制: 冲突0 更新${forced.updated.length}`);
+});
+
+console.log('\n--- 回归验证9: 提交后一次撤销，撤销追加可追溯日志 ---');
+test('回归-撤销: 批量提交后撤销，状态/备注恢复，review_logs追加撤销日志且不可二次撤销', () => {
+  const store = createBatchStore(batchTestEvents);
+  const targetIds = batchTestEvents.slice(0, 2).map(e => e.event_id);
+
+  for (const id of targetIds) store.toggleEventSelection(id);
+  store.batchUpdateEvents(targetIds, 'closed', '待撤销关闭');
+
+  const beforeUndo = store.getEvents().filter(e => targetIds.includes(e.event_id));
+  assertEq(beforeUndo[0].status, 'closed', '撤销前应为closed');
+
+  assert(store.canUndo(), '应可撤销');
+  const ok = store.undoLastBatch();
+  assert(ok, '撤销应成功');
+  assert(!store.canUndo(), '撤销后不可再撤销');
+
+  const afterUndo = store.getEvents().filter(e => targetIds.includes(e.event_id));
+  for (const e of afterUndo) {
+    assertEq(e.status, 'pending', '撤销后状态应恢复pending');
+    assertEq(e.latest_note, undefined, '撤销后备注应恢复原始');
+    const logs = e.review_logs;
+    assertEq(logs.length, 2, '应有批量+撤销共2条日志');
+    assert(logs[0].note === '待撤销关闭', '批量日志应为原始备注');
+    assert(logs[1].note.includes('撤销批量操作'), '撤销日志应含撤销标记');
+    assertEq(logs[1].from_status, 'closed', '撤销日志from_status=closed');
+    assertEq(logs[1].to_status, 'pending', '撤销日志to_status=pending');
+  }
+  console.log(`     撤销成功: 状态恢复pending，备注恢复原始，追加2条可追溯日志`);
+});
+
+console.log('\n--- 回归验证10: 重开持久化 — 撤销快照和事件序列化/反序列化后结果一致 ---');
+test('回归-持久化: 序列化事件+快照 → 反序列化新store → 撤销仍能恢复，状态一致', () => {
+  const store1 = createBatchStore(batchTestEvents);
+  const targetId = batchTestEvents[0].event_id;
+
+  store1.toggleEventSelection(targetId);
+  store1.batchUpdateEvents([targetId], 'confirmed', '持久化前操作');
+
+  const snap = JSON.parse(JSON.stringify(store1.getUndoSnapshot()));
+  const evts = JSON.parse(JSON.stringify(store1.getEvents()));
+
+  const store2 = createBatchStore(evts);
+  store2.restoreUndoSnapshot(snap);
+
+  assert(store2.canUndo(), '反序列化后应可撤销');
+  store2.undoLastBatch();
+
+  const restored = store2.getEvents().find(e => e.event_id === targetId);
+  assertEq(restored.status, 'pending', '反序列化后撤销恢复pending');
+  assertEq(restored.latest_note, undefined, '反序列化后撤销恢复原始备注');
+  assert(restored.review_logs.length >= 2, '反序列化后撤销应有批量+撤销日志');
+  const lastLog = restored.review_logs[restored.review_logs.length - 1];
+  assert(lastLog.note.includes('撤销批量操作'), '反序列化后撤销日志应含撤销标记');
+  console.log(`     反序列化→撤销: status=${restored.status}, logs=${restored.review_logs.length}, 末尾日志含"撤销批量操作"`);
+});
+
+console.log('\n--- 回归验证11: 按当前筛选结果导出CSV/JSON，撤销后不混入已取消改动 ---');
+test('回归-筛选导出: 按筛选条件导出，撤销后导出仅含生效状态，已撤销改动不在主字段', () => {
+  const store = createBatchStore(batchTestEvents);
+  const highIds = batchTestEvents.filter(e => e.risk_level === 'high').map(e => e.event_id);
+
+  for (const id of highIds) store.toggleEventSelection(id);
+  store.batchUpdateEvents(highIds, 'closed', '批量关闭高风险');
+
+  const beforeUndoExport = store.getEvents()
+    .filter(e => e.risk_level === 'high')
+    .map(e => ({ event_id: e.event_id, status: e.status, note: e.latest_note }));
+  assert(beforeUndoExport.every(e => e.status === 'closed'), '撤销前导出全部为closed');
+
+  store.undoLastBatch();
+
+  const afterUndoExport = store.getEvents()
+    .filter(e => e.risk_level === 'high')
+    .map(e => ({ event_id: e.event_id, status: e.status, note: e.latest_note }));
+  assert(afterUndoExport.every(e => e.status === 'pending'), '撤销后导出应恢复pending');
+  assert(afterUndoExport.every(e => e.note === undefined), '撤销后备注应恢复原始');
+
+  const allExport = store.getEvents().map(e => ({ event_id: e.event_id, status: e.status }));
+  assert(!allExport.some(e => e.status === 'closed' && highIds.includes(e.event_id)),
+    '全局导出不应含已撤销的closed状态');
+  console.log(`     筛选high导出${beforeUndoExport.length}条，撤销前全closed，撤销后全pending，全局导出无残留`);
+});
+
 console.log('\n' + '='.repeat(80));
 console.log(`  全部测试完成: 通过 ${pass}, 失败 ${fail}`);
 console.log('='.repeat(80));
 
-// 结果汇总
-const result = {
+const finalResult = {
   test_pass: pass,
   test_fail: fail,
   event_count: events.length,
@@ -1253,10 +1421,9 @@ const result = {
   csv_field_count: CSV_FIELDS.length,
   timestamp: new Date().toISOString(),
 };
-writeFileSync(join(outDir, 'test-result.json'), JSON.stringify(result, null, 2), 'utf8');
+writeFileSync(join(outDir, 'test-result.json'), JSON.stringify(finalResult, null, 2), 'utf8');
 
-// 事件明细
-const summary = events.map(e => ({
+const finalSummary = events.map(e => ({
   event_id: e.event_id,
   canonical_allergen: e.canonical_allergen,
   risk_level: e.risk_level,
@@ -1268,6 +1435,6 @@ const summary = events.map(e => ({
   review_log_count: e.review_logs?.length || 0,
   closed_at: e.closed_at || null,
 }));
-writeFileSync(join(outDir, 'event-summary.json'), JSON.stringify(summary, null, 2), 'utf8');
+writeFileSync(join(outDir, 'event-summary.json'), JSON.stringify(finalSummary, null, 2), 'utf8');
 
 process.exit(fail > 0 ? 1 : 0);

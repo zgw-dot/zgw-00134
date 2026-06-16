@@ -136,7 +136,7 @@ export default function BatchActionPanel() {
   const getSelectedEvents = useBoardStore((s) => s.getSelectedEvents);
   const getClosedInSelection = useBoardStore((s) => s.getClosedInSelection);
   const batchUpdateEvents = useBoardStore((s) => s.batchUpdateEvents);
-  const canUndo = useBoardStore((s) => s.canUndo());
+  const canUndo = useBoardStore((s) => s.undoSnapshot !== null);
   const undoLastBatch = useBoardStore((s) => s.undoLastBatch);
   const undoSnapshot = useBoardStore((s) => s.undoSnapshot);
   const consumeUndoSnapshot = useBoardStore((s) => s.consumeUndoSnapshot);

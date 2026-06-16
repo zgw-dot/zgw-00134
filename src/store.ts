@@ -322,7 +322,21 @@ export const useBoardStore = create<BoardState>()(
 
         const events = state.events.map(e => {
           const original = snapshotMap.get(e.event_id);
-          return original || e;
+          if (!original) return e;
+
+          const undoLog = {
+            id: genId(),
+            timestamp: new Date().toISOString(),
+            from_status: e.status,
+            to_status: original.status,
+            note: `撤销批量操作: ${snapshot.description}`,
+          };
+
+          return {
+            ...original,
+            review_logs: [...e.review_logs, undoLog],
+            updated_at: new Date().toISOString(),
+          };
         });
 
         set({ events, undoSnapshot: null });
