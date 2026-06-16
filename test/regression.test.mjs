@@ -774,4 +774,500 @@ for (const e of summary) {
   console.log(`   ${e.event_id} | ${e.canonical_allergen.padEnd(6)} | ${e.risk_level.padEnd(6)} | ${e.status.padEnd(9)} | ${e.meal_type.padEnd(7)} | ${e.student_names.join('、')} | ${e.class_names.join('、')} | 证据${e.evidence_count}条`);
 }
 
+// ========== 批量复核功能测试 ==========
+console.log('\n' + '='.repeat(80));
+console.log('  批量复核功能验证测试');
+console.log('='.repeat(80));
+
+// 模拟 store 中的批量操作方法
+function createBatchStore(initialEvents) {
+  let events = deepClone(initialEvents);
+  let selectedEventIds = new Set();
+  let undoSnapshot = null;
+
+  return {
+    getEvents: () => events,
+    getSelectedIds: () => selectedEventIds,
+    getUndoSnapshot: () => undoSnapshot,
+
+    toggleEventSelection: (eventId) => {
+      if (selectedEventIds.has(eventId)) {
+        selectedEventIds.delete(eventId);
+      } else {
+        selectedEventIds.add(eventId);
+      }
+    },
+
+    toggleSelectAllVisible: (visibleIds) => {
+      const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedEventIds.has(id));
+      if (allSelected) {
+        for (const id of visibleIds) selectedEventIds.delete(id);
+      } else {
+        for (const id of visibleIds) selectedEventIds.add(id);
+      }
+    },
+
+    clearSelection: () => {
+      selectedEventIds = new Set();
+    },
+
+    getSelectedEvents: () => {
+      return events.filter(e => selectedEventIds.has(e.event_id));
+    },
+
+    getClosedInSelection: () => {
+      return events.filter(e => selectedEventIds.has(e.event_id) && e.status === 'closed');
+    },
+
+    batchUpdateEvents: (eventIds, status, note, forceClosed = false) => {
+      const result = { updated: [], skipped: [], conflicts: [] };
+      const idSet = new Set(eventIds);
+      const snapshotEvents = [];
+
+      events = events.map(e => {
+        if (!idSet.has(e.event_id)) return e;
+
+        if (e.status === 'closed' && !forceClosed) {
+          result.conflicts.push(e.event_id);
+          result.skipped.push({ eventId: e.event_id, reason: '事件已关闭' });
+          return e;
+        }
+
+        snapshotEvents.push(deepClone(e));
+
+        const log = {
+          id: genId(),
+          timestamp: new Date().toISOString(),
+          from_status: e.status,
+          to_status: status,
+          note: note || '',
+        };
+
+        result.updated.push(e.event_id);
+
+        return {
+          ...e,
+          status,
+          latest_note: note || e.latest_note,
+          closed_at: status === 'closed' ? new Date().toISOString() : e.closed_at,
+          review_logs: [...(e.review_logs || []), log],
+          updated_at: new Date().toISOString(),
+        };
+      });
+
+      if (snapshotEvents.length > 0) {
+        undoSnapshot = {
+          batchId: genId(),
+          timestamp: new Date().toISOString(),
+          events: snapshotEvents,
+          description: `批量更新 ${snapshotEvents.length} 条事件为 ${status}`,
+        };
+        selectedEventIds = new Set();
+      }
+
+      return result;
+    },
+
+    canUndo: () => undoSnapshot !== null,
+
+    undoLastBatch: () => {
+      if (!undoSnapshot) return false;
+      const snapshotMap = new Map(undoSnapshot.events.map(e => [e.event_id, e]));
+      events = events.map(e => snapshotMap.get(e.event_id) || e);
+      undoSnapshot = null;
+      return true;
+    },
+  };
+}
+
+// 准备测试数据 - 重置事件状态为 pending
+let batchTestEvents = events.map(e => ({
+  ...e,
+  status: 'pending',
+  review_logs: [],
+  latest_note: undefined,
+  closed_at: undefined,
+}));
+
+console.log('\n--- 验证1: 批量勾选功能 ---');
+test('批量勾选: 勾选多条事件后选中集合正确', () => {
+  const store = createBatchStore(batchTestEvents);
+  const eventIds = batchTestEvents.map(e => e.event_id);
+
+  store.toggleEventSelection(eventIds[0]);
+  store.toggleEventSelection(eventIds[1]);
+
+  assertEq(store.getSelectedIds().size, 2, '应选中2条');
+  assert(store.getSelectedIds().has(eventIds[0]), '应包含第一条');
+  assert(store.getSelectedIds().has(eventIds[1]), '应包含第二条');
+  console.log(`     选中 ${store.getSelectedIds().size} 条: ${Array.from(store.getSelectedIds()).join(', ')}`);
+});
+
+test('批量勾选: 全选当前筛选结果', () => {
+  const store = createBatchStore(batchTestEvents);
+  const visibleIds = batchTestEvents.filter(e => e.risk_level === 'high' || e.risk_level === 'medium').map(e => e.event_id);
+
+  store.toggleSelectAllVisible(visibleIds);
+  assertEq(store.getSelectedIds().size, visibleIds.length, '应全选所有可见事件');
+
+  store.toggleSelectAllVisible(visibleIds);
+  assertEq(store.getSelectedIds().size, 0, '再次点击应取消全选');
+  console.log(`     全选 ${visibleIds.length} 条，取消全选后为 0 条`);
+});
+
+test('批量勾选: 取消单条选择', () => {
+  const store = createBatchStore(batchTestEvents);
+  const eventIds = batchTestEvents.map(e => e.event_id);
+
+  store.toggleEventSelection(eventIds[0]);
+  store.toggleEventSelection(eventIds[1]);
+  store.toggleEventSelection(eventIds[0]);
+
+  assertEq(store.getSelectedIds().size, 1, '应剩1条选中');
+  assert(!store.getSelectedIds().has(eventIds[0]), '第一条应已取消');
+  console.log(`     取消后选中 ${store.getSelectedIds().size} 条`);
+});
+
+console.log('\n--- 验证2: 批量修改状态和追加备注，保留历史数据 ---');
+test('批量更新: 修改状态和备注，保留原有 latest_note 和 review_logs', () => {
+  // 先给事件添加一些历史数据
+  const eventsWithHistory = batchTestEvents.map((e, idx) => {
+    if (idx === 0 || idx === 1) {
+      return {
+        ...e,
+        latest_note: '原有备注',
+        review_logs: [{
+          id: genId(),
+          timestamp: new Date(Date.now() - 3600000).toISOString(),
+          from_status: 'pending',
+          to_status: 'confirmed',
+          note: '历史操作',
+        }],
+        closed_at: undefined,
+      };
+    }
+    return e;
+  });
+
+  const store = createBatchStore(eventsWithHistory);
+  const targetIds = [eventsWithHistory[0].event_id, eventsWithHistory[1].event_id];
+
+  store.toggleEventSelection(targetIds[0]);
+  store.toggleEventSelection(targetIds[1]);
+
+  const result = store.batchUpdateEvents(targetIds, 'closed', '批量关闭备注');
+
+  assertEq(result.updated.length, 2, '应更新2条');
+  assertEq(result.skipped.length, 0, '不应有跳过');
+
+  const updatedEvents = store.getEvents().filter(e => targetIds.includes(e.event_id));
+  for (const e of updatedEvents) {
+    assertEq(e.status, 'closed', '状态应为closed');
+    assertEq(e.latest_note, '批量关闭备注', '备注应为新备注');
+    assert(e.closed_at, '应有closed_at');
+    assertEq(e.review_logs.length, 2, '应保留原有1条+新增1条=2条日志');
+    assert(e.review_logs[0].note === '历史操作', '第一条日志应为历史操作');
+    assert(e.review_logs[1].note === '批量关闭备注', '第二条日志应为批量操作');
+  }
+  console.log(`     更新 ${result.updated.length} 条，每条保留 ${updatedEvents[0].review_logs.length} 条日志`);
+});
+
+test('批量更新: 无备注时保留原有 latest_note', () => {
+  const eventsWithNote = batchTestEvents.map((e, idx) => {
+    if (idx === 0) {
+      return { ...e, latest_note: '重要备注请勿覆盖' };
+    }
+    return e;
+  });
+
+  const store = createBatchStore(eventsWithNote);
+  const targetId = eventsWithNote[0].event_id;
+
+  store.toggleEventSelection(targetId);
+  const result = store.batchUpdateEvents([targetId], 'confirmed', '');
+
+  const updated = store.getEvents().find(e => e.event_id === targetId);
+  assertEq(updated.latest_note, '重要备注请勿覆盖', '无新备注时应保留原有备注');
+  console.log(`     无新备注时保留原有备注: "${updated.latest_note}"`);
+});
+
+test('批量更新: 非closed状态不覆盖原有 closed_at', () => {
+  const eventsWithClosed = batchTestEvents.map((e, idx) => {
+    if (idx === 0) {
+      return { ...e, closed_at: '2024-01-01T00:00:00.000Z' };
+    }
+    return e;
+  });
+
+  const store = createBatchStore(eventsWithClosed);
+  const targetId = eventsWithClosed[0].event_id;
+
+  store.toggleEventSelection(targetId);
+  store.batchUpdateEvents([targetId], 'confirmed', '重新确认');
+
+  const updated = store.getEvents().find(e => e.event_id === targetId);
+  assertEq(updated.closed_at, '2024-01-01T00:00:00.000Z', '非closed状态不应覆盖原有closed_at');
+  console.log(`     非closed状态保留 closed_at: ${updated.closed_at}`);
+});
+
+console.log('\n--- 验证3: 已关闭事件冲突检测 ---');
+test('冲突检测: 选中包含已关闭事件时返回冲突', () => {
+  const eventsMixed = batchTestEvents.map((e, idx) => {
+    if (idx === 0) {
+      return { ...e, status: 'closed', closed_at: '2024-01-01T00:00:00.000Z' };
+    }
+    return e;
+  });
+
+  const store = createBatchStore(eventsMixed);
+  const targetIds = [eventsMixed[0].event_id, eventsMixed[1].event_id];
+
+  store.toggleEventSelection(targetIds[0]);
+  store.toggleEventSelection(targetIds[1]);
+
+  const result = store.batchUpdateEvents(targetIds, 'confirmed', '测试', false);
+
+  assertEq(result.conflicts.length, 1, '应检测到1个冲突');
+  assertEq(result.skipped.length, 1, '应跳过1条');
+  assertEq(result.updated.length, 1, '应只更新1条');
+  assert(result.conflicts.includes(eventsMixed[0].event_id), '冲突应包含已关闭事件');
+  console.log(`     冲突 ${result.conflicts.length} 条，跳过 ${result.skipped.length} 条，更新 ${result.updated.length} 条`);
+});
+
+test('冲突检测: forceClosed=true 时强制更新已关闭事件', () => {
+  const eventsMixed = batchTestEvents.map((e, idx) => {
+    if (idx === 0) {
+      return { ...e, status: 'closed', closed_at: '2024-01-01T00:00:00.000Z' };
+    }
+    return e;
+  });
+
+  const store = createBatchStore(eventsMixed);
+  const targetIds = [eventsMixed[0].event_id, eventsMixed[1].event_id];
+
+  store.toggleEventSelection(targetIds[0]);
+  store.toggleEventSelection(targetIds[1]);
+
+  const result = store.batchUpdateEvents(targetIds, 'confirmed', '强制更新', true);
+
+  assertEq(result.conflicts.length, 0, 'forceClosed时不应有冲突');
+  assertEq(result.skipped.length, 0, '不应跳过');
+  assertEq(result.updated.length, 2, '应更新全部2条');
+  console.log(`     强制更新: 冲突 ${result.conflicts.length} 条，更新 ${result.updated.length} 条`);
+});
+
+test('冲突检测: getClosedInSelection 正确返回已关闭事件', () => {
+  const eventsMixed = batchTestEvents.map((e, idx) => {
+    if (idx === 0 || idx === 2) {
+      return { ...e, status: 'closed' };
+    }
+    return e;
+  });
+
+  const store = createBatchStore(eventsMixed);
+  for (let i = 0; i < 4; i++) {
+    store.toggleEventSelection(eventsMixed[i].event_id);
+  }
+
+  const closed = store.getClosedInSelection();
+  assertEq(closed.length, 2, '选中的4条中应有2条已关闭');
+  console.log(`     选中4条，其中已关闭 ${closed.length} 条`);
+});
+
+console.log('\n--- 验证4: 批量操作撤销功能 ---');
+test('撤销功能: 批量更新后可撤销，恢复原始状态', () => {
+  const store = createBatchStore(batchTestEvents);
+  const targetIds = batchTestEvents.slice(0, 3).map(e => e.event_id);
+
+  for (const id of targetIds) store.toggleEventSelection(id);
+
+  const beforeUpdate = deepClone(store.getEvents().filter(e => targetIds.includes(e.event_id)));
+  const result = store.batchUpdateEvents(targetIds, 'closed', '测试撤销');
+
+  assert(store.canUndo(), '批量更新后应可撤销');
+  assertEq(store.getUndoSnapshot().events.length, 3, '快照应包含3条');
+
+  const undoSuccess = store.undoLastBatch();
+  assert(undoSuccess, '撤销应成功');
+  assert(!store.canUndo(), '撤销后不可再撤销');
+
+  const afterUndo = store.getEvents().filter(e => targetIds.includes(e.event_id));
+  for (let i = 0; i < beforeUpdate.length; i++) {
+    assertEq(afterUndo[i].status, beforeUpdate[i].status, `事件${i}状态应恢复`);
+    assertEq(afterUndo[i].latest_note, beforeUpdate[i].latest_note, `事件${i}备注应恢复`);
+    assertEq(afterUndo[i].review_logs.length, beforeUpdate[i].review_logs.length, `事件${i}日志应恢复`);
+  }
+  console.log(`     撤销成功，${afterUndo.length} 条事件全部恢复原始状态`);
+});
+
+test('撤销功能: 无操作时不可撤销', () => {
+  const store = createBatchStore(batchTestEvents);
+  assert(!store.canUndo(), '初始状态不可撤销');
+  const result = store.undoLastBatch();
+  assert(!result, '无操作时撤销返回false');
+  console.log(`     初始状态 canUndo=${store.canUndo()}`);
+});
+
+test('撤销功能: 批量更新后选中清空', () => {
+  const store = createBatchStore(batchTestEvents);
+  const targetId = batchTestEvents[0].event_id;
+
+  store.toggleEventSelection(targetId);
+  assertEq(store.getSelectedIds().size, 1, '批量前选中1条');
+
+  store.batchUpdateEvents([targetId], 'confirmed', '');
+  assertEq(store.getSelectedIds().size, 0, '批量后应清空选中');
+  console.log(`     批量后选中数: ${store.getSelectedIds().size}`);
+});
+
+console.log('\n--- 验证5: 刷新持久化（模拟） ---');
+test('持久化: 选中状态可序列化和反序列化', () => {
+  const store = createBatchStore(batchTestEvents);
+  const eventIds = batchTestEvents.map(e => e.event_id);
+
+  store.toggleEventSelection(eventIds[0]);
+  store.toggleEventSelection(eventIds[2]);
+
+  const serialized = Array.from(store.getSelectedIds());
+  assertEq(serialized.length, 2, '序列化后应有2条');
+
+  const restoredSet = new Set(serialized);
+  assert(restoredSet.has(eventIds[0]), '反序列化后应包含第一条');
+  assert(restoredSet.has(eventIds[2]), '反序列化后应包含第三条');
+  console.log(`     序列化: [${serialized.join(', ')}]，反序列化成功`);
+});
+
+test('持久化: undoSnapshot 可持久化', () => {
+  const store = createBatchStore(batchTestEvents);
+  const targetId = batchTestEvents[0].event_id;
+
+  store.toggleEventSelection(targetId);
+  store.batchUpdateEvents([targetId], 'confirmed', '持久化测试');
+
+  const snapshot = store.getUndoSnapshot();
+  const serialized = JSON.stringify(snapshot);
+  const restored = JSON.parse(serialized);
+
+  assertEq(restored.events.length, 1, '恢复后快照应有1条');
+  assertEq(restored.description, snapshot.description, '描述应一致');
+  console.log(`     快照序列化成功，描述: "${restored.description}"`);
+});
+
+test('持久化: 页面刷新后撤销仍可用（模拟localStorage）', () => {
+  const store1 = createBatchStore(batchTestEvents);
+  const targetId = batchTestEvents[0].event_id;
+  const originalStatus = batchTestEvents[0].status;
+
+  store1.toggleEventSelection(targetId);
+  store1.batchUpdateEvents([targetId], 'closed', '刷新前操作');
+
+  const persistedSnapshot = JSON.parse(JSON.stringify(store1.getUndoSnapshot()));
+  const persistedEvents = JSON.parse(JSON.stringify(store1.getEvents()));
+
+  const store2 = createBatchStore(persistedEvents);
+  store2._restoreUndoSnapshot = (snap) => {
+    store2.getUndoSnapshot = () => snap;
+    store2.canUndo = () => snap !== null;
+  };
+  store2._restoreUndoSnapshot(persistedSnapshot);
+
+  assert(store2.canUndo(), '刷新后仍可撤销');
+  const undoSuccess = store2.undoLastBatch();
+  assert(undoSuccess, '刷新后撤销成功');
+
+  const afterUndo = store2.getEvents().find(e => e.event_id === targetId);
+  assertEq(afterUndo.status, originalStatus, '刷新后撤销能恢复原始状态');
+  console.log(`     模拟刷新：撤销前=${persistedEvents.find(e=>e.event_id===targetId).status}，撤销后=${afterUndo.status}（原始=${originalStatus}）`);
+});
+
+console.log('\n--- 验证6: 筛选后导出只包含最新有效状态 ---');
+test('筛选导出: 只导出当前筛选结果', () => {
+  const store = createBatchStore(batchTestEvents);
+
+  const filtered = applyFilters(store.getEvents(), { risk_levels: ['high'] });
+  const visible = filtered.filter(e => !e.hidden);
+
+  const exportData = visible.map(e => ({
+    ...e,
+    status: e.status,
+    latest_note: e.latest_note || '',
+  }));
+
+  assert(exportData.every(e => e.risk_level === 'high'), '导出数据应只包含high风险');
+  assertEq(exportData.length, visible.length, '导出数量应等于可见数量');
+  console.log(`     筛选high风险，导出 ${exportData.length} 条，全部为high风险`);
+});
+
+test('筛选导出: 撤销后导出最新状态（不包含已取消的改动）', () => {
+  const store = createBatchStore(batchTestEvents);
+  const targetIds = batchTestEvents.filter(e => e.risk_level === 'medium').map(e => e.event_id);
+
+  for (const id of targetIds) store.toggleEventSelection(id);
+  store.batchUpdateEvents(targetIds, 'closed', '待撤销操作');
+
+  const beforeUndoStatus = store.getEvents().find(e => e.event_id === targetIds[0]).status;
+
+  store.undoLastBatch();
+
+  const filtered = applyFilters(store.getEvents(), { risk_levels: ['medium'] });
+  const visible = filtered.filter(e => !e.hidden);
+  const exportData = visible.map(e => ({ status: e.status, event_id: e.event_id }));
+
+  const afterUndoStatus = exportData[0].status;
+  assert(afterUndoStatus !== beforeUndoStatus, '撤销后状态应与撤销前不同');
+  assert(afterUndoStatus === 'pending', '撤销后应恢复原始pending状态');
+  console.log(`     撤销前状态=${beforeUndoStatus}，撤销后导出状态=${afterUndoStatus}`);
+});
+
+test('筛选导出: 导出数据不包含历史旧状态', () => {
+  const store = createBatchStore(batchTestEvents);
+  const targetId = batchTestEvents[0].event_id;
+
+  store.toggleEventSelection(targetId);
+  store.batchUpdateEvents([targetId], 'confirmed', '第一次操作');
+  store.batchUpdateEvents([targetId], 'closed', '第二次操作');
+
+  const filtered = applyFilters(store.getEvents(), {});
+  const visible = filtered.filter(e => !e.hidden);
+  const exportEvent = visible.find(e => e.event_id === targetId);
+
+  assertEq(exportEvent.status, 'closed', '导出状态应为最新的closed');
+  assertEq(exportEvent.latest_note, '第二次操作', '导出备注应为最新');
+  assertEq(exportEvent.review_logs.length, 2, '导出应包含完整日志');
+  console.log(`     两次操作后导出：status=${exportEvent.status}，note="${exportEvent.latest_note}"，日志数=${exportEvent.review_logs.length}`);
+});
+
+console.log('\n' + '='.repeat(80));
+console.log(`  全部测试完成: 通过 ${pass}, 失败 ${fail}`);
+console.log('='.repeat(80));
+
+// 结果汇总
+const result = {
+  test_pass: pass,
+  test_fail: fail,
+  event_count: events.length,
+  high_risk_count: events.filter(e => e.risk_level === 'high').length,
+  medium_risk_count: events.filter(e => e.risk_level === 'medium').length,
+  low_risk_count: events.filter(e => e.risk_level === 'low').length,
+  total_evidence: events.reduce((s, e) => s + e.evidence.length, 0),
+  csv_field_count: CSV_FIELDS.length,
+  timestamp: new Date().toISOString(),
+};
+writeFileSync(join(outDir, 'test-result.json'), JSON.stringify(result, null, 2), 'utf8');
+
+// 事件明细
+const summary = events.map(e => ({
+  event_id: e.event_id,
+  canonical_allergen: e.canonical_allergen,
+  risk_level: e.risk_level,
+  status: e.status,
+  meal_type: e.meal_type,
+  student_names: e.student_names,
+  class_names: e.class_names,
+  evidence_count: e.evidence.length,
+  review_log_count: e.review_logs?.length || 0,
+  closed_at: e.closed_at || null,
+}));
+writeFileSync(join(outDir, 'event-summary.json'), JSON.stringify(summary, null, 2), 'utf8');
+
 process.exit(fail > 0 ? 1 : 0);

@@ -11,6 +11,8 @@ import type {
   FilterState,
   BoardStats,
   EventStatus,
+  BatchUpdateResult,
+  UndoSnapshot,
 } from '@/types';
 import { generateRiskEvents } from '@/utils/engine';
 import { applyFilters } from '@/utils/filters';
@@ -34,6 +36,8 @@ interface BoardState {
   importBatches: ImportBatch[];
   filters: FilterState;
   selectedEventId: string | null;
+  selectedEventIds: Set<string>;
+  undoSnapshot: UndoSnapshot | null;
 
   setAliasMap: (map: AllergenAliasMap) => { ok: boolean; errors: string[] };
   regenerateEvents: () => void;
@@ -44,6 +48,22 @@ interface BoardState {
   setFilters: (f: Partial<FilterState>) => void;
   selectEvent: (id: string | null) => void;
   updateEventStatus: (eventId: string, status: EventStatus, note?: string) => void;
+
+  toggleEventSelection: (eventId: string) => void;
+  toggleSelectAllVisible: () => void;
+  clearSelection: () => void;
+  getSelectedEvents: () => RiskEvent[];
+  getClosedInSelection: () => RiskEvent[];
+
+  batchUpdateEvents: (
+    eventIds: string[],
+    status: EventStatus,
+    note?: string,
+    forceClosed?: boolean
+  ) => BatchUpdateResult;
+  canUndo: () => boolean;
+  undoLastBatch: () => boolean;
+  consumeUndoSnapshot: () => void;
 
   importData: (
     fileType: 'menu' | 'profile' | 'pickup' | 'complaint',
@@ -82,6 +102,8 @@ export const useBoardStore = create<BoardState>()(
       importBatches: [],
       filters: defaultFilters,
       selectedEventId: null,
+      selectedEventIds: new Set(),
+      undoSnapshot: null,
 
       setAliasMap: (map: AllergenAliasMap) => {
         const errors = validateAliasMap(map as AliasMap);
@@ -169,13 +191,146 @@ export const useBoardStore = create<BoardState>()(
               ...e,
               status,
               latest_note: note || e.latest_note,
-              closed_at: status === 'closed' ? new Date().toISOString() : undefined,
+              closed_at: status === 'closed' ? new Date().toISOString() : e.closed_at,
               review_logs: [...(e.review_logs || []), log],
               updated_at: new Date().toISOString(),
             };
           });
           return { events };
         });
+      },
+
+      toggleEventSelection: (eventId: string) => {
+        set(state => {
+          const newSet = new Set(state.selectedEventIds);
+          if (newSet.has(eventId)) {
+            newSet.delete(eventId);
+          } else {
+            newSet.add(eventId);
+          }
+          return { selectedEventIds: newSet };
+        });
+      },
+
+      toggleSelectAllVisible: () => {
+        set(state => {
+          const visible = state.getVisibleEvents();
+          const visibleIds = new Set(visible.map(e => e.event_id));
+          const currentSelected = state.selectedEventIds;
+          const allSelected = visible.length > 0 && visible.every(e => currentSelected.has(e.event_id));
+
+          if (allSelected) {
+            const newSet = new Set(currentSelected);
+            for (const id of visibleIds) {
+              newSet.delete(id);
+            }
+            return { selectedEventIds: newSet };
+          } else {
+            return { selectedEventIds: new Set([...currentSelected, ...visibleIds]) };
+          }
+        });
+      },
+
+      clearSelection: () => {
+        set({ selectedEventIds: new Set() });
+      },
+
+      getSelectedEvents: () => {
+        const state = get();
+        return state.events.filter(e => state.selectedEventIds.has(e.event_id));
+      },
+
+      getClosedInSelection: () => {
+        return get().getSelectedEvents().filter(e => e.status === 'closed');
+      },
+
+      batchUpdateEvents: (
+        eventIds: string[],
+        status: EventStatus,
+        note?: string,
+        forceClosed: boolean = false
+      ): BatchUpdateResult => {
+        const state = get();
+        const result: BatchUpdateResult = {
+          updated: [],
+          skipped: [],
+          conflicts: [],
+        };
+
+        const idSet = new Set(eventIds);
+        const snapshotEvents: RiskEvent[] = [];
+
+        const events = state.events.map(e => {
+          if (!idSet.has(e.event_id)) return e;
+
+          if (e.status === 'closed' && !forceClosed) {
+            result.conflicts.push(e.event_id);
+            result.skipped.push({
+              eventId: e.event_id,
+              reason: '事件已关闭，需确认后强制更新',
+            });
+            return e;
+          }
+
+          snapshotEvents.push({ ...e });
+
+          const log = {
+            id: genId(),
+            timestamp: new Date().toISOString(),
+            from_status: e.status,
+            to_status: status,
+            note: note || '',
+          };
+
+          result.updated.push(e.event_id);
+
+          return {
+            ...e,
+            status,
+            latest_note: note || e.latest_note,
+            closed_at: status === 'closed' ? new Date().toISOString() : e.closed_at,
+            review_logs: [...(e.review_logs || []), log],
+            updated_at: new Date().toISOString(),
+          };
+        });
+
+        if (snapshotEvents.length > 0) {
+          const snapshot: UndoSnapshot = {
+            batchId: genId(),
+            timestamp: new Date().toISOString(),
+            events: snapshotEvents,
+            description: `批量更新 ${snapshotEvents.length} 条事件状态为 ${status}${note ? '，附加备注' : ''}`,
+          };
+          set({ events, undoSnapshot: snapshot, selectedEventIds: new Set() });
+        } else {
+          set({ events });
+        }
+
+        return result;
+      },
+
+      canUndo: () => {
+        return get().undoSnapshot !== null;
+      },
+
+      undoLastBatch: (): boolean => {
+        const state = get();
+        const snapshot = state.undoSnapshot;
+        if (!snapshot) return false;
+
+        const snapshotMap = new Map(snapshot.events.map(e => [e.event_id, e]));
+
+        const events = state.events.map(e => {
+          const original = snapshotMap.get(e.event_id);
+          return original || e;
+        });
+
+        set({ events, undoSnapshot: null });
+        return true;
+      },
+
+      consumeUndoSnapshot: () => {
+        set({ undoSnapshot: null });
       },
 
       importData: (
@@ -253,11 +408,34 @@ export const useBoardStore = create<BoardState>()(
           events: [],
           importBatches: [],
           selectedEventId: null,
+          selectedEventIds: new Set(),
+          undoSnapshot: null,
         });
       },
     }),
     {
       name: 'allergy-board-store',
+      partialize: (state) => ({
+        menus: state.menus,
+        profiles: state.profiles,
+        pickups: state.pickups,
+        complaints: state.complaints,
+        aliasMap: state.aliasMap,
+        events: state.events,
+        importBatches: state.importBatches,
+        filters: state.filters,
+        selectedEventIds: Array.from(state.selectedEventIds),
+        undoSnapshot: state.undoSnapshot,
+      }),
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          if (Array.isArray((state as any).selectedEventIds)) {
+            (state as any).selectedEventIds = new Set((state as any).selectedEventIds);
+          } else {
+            (state as any).selectedEventIds = new Set();
+          }
+        }
+      },
     }
   )
 );

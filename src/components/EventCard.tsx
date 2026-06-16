@@ -12,12 +12,16 @@ import {
   ShoppingBag,
   MessageSquareWarning,
   StickyNote,
+  CheckSquare,
+  Square,
 } from 'lucide-react';
 
 interface EventCardProps {
   event: RiskEvent;
   onClick: () => void;
   selected: boolean;
+  batchSelected: boolean;
+  onBatchSelect: (checked: boolean) => void;
 }
 
 const STATUS_STYLES: Record<EventStatus, { bg: string; text: string; border: string; label: string }> = {
@@ -97,7 +101,7 @@ function formatStudentDisplay(names: string[], classes: string[]): string {
   return `${firstTwo.join('、')} 等${names.length}人`;
 }
 
-export default function EventCard({ event, onClick, selected }: EventCardProps) {
+export default function EventCard({ event, onClick, selected, batchSelected, onBatchSelect }: EventCardProps) {
   const statusStyle = STATUS_STYLES[event.status];
   const riskBarColor = RISK_BAR_COLORS[event.risk_level];
 
@@ -111,6 +115,11 @@ export default function EventCard({ event, onClick, selected }: EventCardProps) 
     evidenceCounts[ev.type]++;
   }
 
+  const handleCheckboxClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onBatchSelect(!batchSelected);
+  };
+
   return (
     <div
       onClick={onClick}
@@ -119,6 +128,8 @@ export default function EventCard({ event, onClick, selected }: EventCardProps) 
         'border bg-slate-800',
         selected
           ? 'border-teal-500 shadow-lg shadow-teal-500/10 ring-1 ring-teal-500/30'
+          : batchSelected
+          ? 'border-teal-400/60 shadow-md shadow-teal-500/5'
           : 'border-slate-700 hover:border-slate-600 hover:shadow-md'
       )}
     >
@@ -127,6 +138,23 @@ export default function EventCard({ event, onClick, selected }: EventCardProps) 
       <div className="p-4 pl-5">
         <div className="mb-3 flex items-start justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleCheckboxClick}
+              className={cn(
+                'flex h-5 w-5 flex-none items-center justify-center rounded transition-colors',
+                batchSelected
+                  ? 'text-teal-400'
+                  : 'text-slate-500 hover:text-slate-300'
+              )}
+              title={batchSelected ? '取消选择' : '批量选择'}
+            >
+              {batchSelected ? (
+                <CheckSquare className="h-5 w-5 fill-teal-500/20" />
+              ) : (
+                <Square className="h-5 w-5" />
+              )}
+            </button>
             <span
               className={cn(
                 'inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium',

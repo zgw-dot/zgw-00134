@@ -116,3 +116,16 @@ export interface BoardStats {
   medium_risk: number;
   low_risk: number;
 }
+
+export interface BatchUpdateResult {
+  updated: string[];
+  skipped: { eventId: string; reason: string }[];
+  conflicts: string[];
+}
+
+export interface UndoSnapshot {
+  batchId: string;
+  timestamp: string;
+  events: RiskEvent[];
+  description: string;
+}

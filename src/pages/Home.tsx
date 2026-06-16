@@ -8,6 +8,7 @@ import EventDetailDrawer from '@/components/EventDetailDrawer';
 import ImportModal from '@/components/ImportModal';
 import ExportPanel from '@/components/ExportPanel';
 import AliasModal from '@/components/AliasModal';
+import BatchActionPanel from '@/components/BatchActionPanel';
 import { applyFilters } from '@/utils/filters';
 import type { BoardStats } from '@/types';
 import {
@@ -141,6 +142,8 @@ export default function Home() {
           onSelect={selectEvent}
         />
       </main>
+
+      <BatchActionPanel />
 
       <EventDetailDrawer
         event={selectedEvent}
