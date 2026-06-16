@@ -1,0 +1,66 @@
+{
+  "menu_import": {
+    "success_count": 5,
+    "error_count": 2,
+    "text": "数据导入\n\n选择对应类型的 JSON 文件进行导入\n\n菜单\n过敏档案\n领餐记录\n投诉\nmenu.json\n1.6 KB\n重新选择\n✓ 5条记录导入成功\n✗ 2条错误\n关闭"
+  },
+  "profile_import": {
+    "success_count": 5,
+    "error_count": 0,
+    "text": "数据导入\n\n选择对应类型的 JSON 文件进行导入\n\n菜单\n过敏档案\n领餐记录\n投诉\nprofiles.json\n898 B\n重新选择\n✓ 5条记录导入成功\n关闭"
+  },
+  "pickup_import": {
+    "success_count": 8,
+    "error_count": 0,
+    "text": "数据导入\n\n选择对应类型的 JSON 文件进行导入\n\n菜单\n过敏档案\n领餐记录\n投诉\npickups.json\n1.7 KB\n重新选择\n✓ 8条记录导入成功\n关闭"
+  },
+  "complaint_import": {
+    "success_count": 2,
+    "error_count": 1,
+    "text": "数据导入\n\n选择对应类型的 JSON 文件进行导入\n\n菜单\n过敏档案\n领餐记录\n投诉\ncomplaints.json\n1.2 KB\n重新选择\n✓ 2条记录导入成功\n✗ 1条错误\n关闭"
+  },
+  "count_after_import_text": "共 6 条事件",
+  "count_after_import": {
+    "visible": 6,
+    "total": 6
+  },
+  "stats_after_import": {
+    "high": "1",
+    "medium": "4",
+    "low": "1",
+    "closed": "0"
+  },
+  "storage_keys_after_import": [
+    "allergy-board-store"
+  ],
+  "count_after_high_filter_text": "共 1 条事件(总 6 条，已筛选)",
+  "count_after_high_filter": {
+    "visible": 1,
+    "total": 6
+  },
+  "visible_card_count_after_high_filter": 1,
+  "drawer_has_high_risk": true,
+  "drawer_has_complaint_evidence": true,
+  "drawer_has_peanut": true,
+  "stats_after_close": {
+    "closed": "1"
+  },
+  "count_after_reload_high_filter_text": "共 6 条事件",
+  "count_after_reload_high_filter": {
+    "visible": 6,
+    "total": 6
+  },
+  "drawer_after_reload_contains_closed": true,
+  "drawer_after_reload_contains_note": false,
+  "filtered_export_csv_line_count": 7,
+  "bad_complaint_modal_text": "数据导入\n\n选择对应类型的 JSON 文件进行导入\n\n菜单\n过敏档案\n领餐记录\n投诉\nbad-complaint.json\n17 B\n重新选择\n✗ 1条错误\n关闭",
+  "count_after_reset_reimport_text": "共 6 条事件",
+  "count_after_reset_reimport": {
+    "visible": 6,
+    "total": 6
+  },
+  "stats_after_reset_reimport": {
+    "high": "1",
+    "closed": "0"
+  }
+}

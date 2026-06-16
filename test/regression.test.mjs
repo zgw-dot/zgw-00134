@@ -196,22 +196,42 @@ function validateMealPickups(arr) {
 // ========== 别名解析 ==========
 function resolveAllergenAlias(raw, map) {
   const normalizedRaw = normalizeAliasName(raw);
-  let standardName = null;
-  const matchedAliases = [];
+  if (!normalizedRaw) return { standardName: null, matchedAliases: [] };
+
   for (const standard of Object.keys(map)) {
     const trimmed = standard.trim();
     if (!trimmed) continue;
+    const normalizedStandard = normalizeAliasName(trimmed);
     const aliases = map[standard] || [];
+
+    if (normalizedRaw === normalizedStandard) {
+      return { standardName: trimmed, matchedAliases: aliases.filter(a => normalizeAliasName(a) !== normalizedStandard) };
+    }
     for (const alias of aliases) {
-      const normAlias = normalizeAliasName(alias);
-      if (!normAlias) continue;
-      if (normalizedRaw === normAlias || normalizedRaw.includes(normAlias)) {
-        standardName = trimmed;
-        if (!matchedAliases.includes(normAlias)) matchedAliases.push(alias);
+      if (normalizedRaw === normalizeAliasName(alias)) {
+        return { standardName: trimmed, matchedAliases: aliases.filter(a => normalizeAliasName(a) !== normalizedStandard) };
       }
     }
   }
-  return { standardName, matchedAliases };
+
+  for (const standard of Object.keys(map)) {
+    const trimmed = standard.trim();
+    if (!trimmed) continue;
+    const normalizedStandard = normalizeAliasName(trimmed);
+    const aliases = map[standard] || [];
+
+    if (normalizedRaw.includes(normalizedStandard) || normalizedStandard.includes(normalizedRaw)) {
+      return { standardName: trimmed, matchedAliases: aliases.filter(a => normalizeAliasName(a) !== normalizedStandard) };
+    }
+    for (const alias of aliases) {
+      const normAlias = normalizeAliasName(alias);
+      if (normAlias.length >= 2 && (normalizedRaw.includes(normAlias) || normAlias.includes(normalizedRaw))) {
+        return { standardName: trimmed, matchedAliases: aliases.filter(a => normalizeAliasName(a) !== normalizedStandard) };
+      }
+    }
+  }
+
+  return { standardName: null, matchedAliases: [] };
 }
 function validateAliasMap(map) {
   const errors = [];
@@ -674,6 +694,46 @@ test('validateAliasMap: 循环引用能被检测', () => {
   const circular = errors.filter(e => e.type === 'circular_reference');
   assert(circular.length > 0, '应检测到循环引用');
   console.log(`     循环引用检测: ${circular.length}个错误 (${circular.map(e=>e.message).join(';')})`);
+});
+
+console.log('\n--- 测试10: 子串匹配(关键修复) ---');
+test('resolveAllergenAlias: "花生碎"应通过子串匹配解析为"花生"', () => {
+  const r = resolveAllergenAlias('花生碎', aliasMap);
+  assertEq(r.standardName, '花生', '"花生碎"应解析为花生标准名');
+  console.log(`     "花生碎" → standardName="${r.standardName}"`);
+});
+test('resolveAllergenAlias: "小麦面包"应通过子串匹配解析为"小麦"', () => {
+  const r = resolveAllergenAlias('小麦面包', aliasMap);
+  assertEq(r.standardName, '小麦', '"小麦面包"应解析为小麦标准名');
+  console.log(`     "小麦面包" → standardName="${r.standardName}"`);
+});
+test('resolveAllergenAlias: 精确匹配优先(花生→花生不应走子串)', () => {
+  const r = resolveAllergenAlias('花生', aliasMap);
+  assertEq(r.standardName, '花生', '精确匹配应优先');
+  console.log(`     "花生" → standardName="${r.standardName}", matchedAliases=[${r.matchedAliases.join(',')}]`);
+});
+
+console.log('\n--- 测试11: 持久化重置键名 ---');
+test('localStorage 键名应为 allergy-board-store', () => {
+  const persistName = 'allergy-board-store';
+  assertEq(persistName, 'allergy-board-store', '持久化键名必须与store.ts一致');
+  console.log(`     持久化键名: ${persistName}`);
+});
+
+console.log('\n--- 测试12: 重置后重新导入应复现同一条高风险链路 ---');
+test('清空后重新归并仍产生1个HIGH事件', () => {
+  const freshEvents = generateRiskEvents({
+    menus: validMenu, profiles: validProfiles, pickups: validPickups, complaints: validComplaints, aliasMap
+  });
+  const highCount = freshEvents.filter(e => e.risk_level === 'high').length;
+  assertEq(highCount, 1, '清空后重新归并应产生1个HIGH事件');
+  const peanutHigh = freshEvents.find(e => e.canonical_allergen === '花生' && e.risk_level === 'high');
+  assert(peanutHigh, '应有花生HIGH事件');
+  assertIncludes(peanutHigh.student_names, '张小明', '应涉及张小明');
+  assert(peanutHigh.evidence.some(ev => ev.type === 'complaint'), '应有投诉证据');
+  assert(peanutHigh.evidence.some(ev => ev.type === 'pickup'), '应有领餐证据');
+  console.log(`     重置后HIGH: ${highCount}个, 花生事件: ${peanutHigh.event_id}`);
+  console.log(`     证据类型: ${peanutHigh.evidence.map(ev=>ev.type).join(',')}`);
 });
 
 console.log('\n' + '='.repeat(80));

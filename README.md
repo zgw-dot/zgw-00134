@@ -201,7 +201,7 @@ sample-data/                # 样例数据
 
 ### 常见问题
 
-- **Q: 数据存在哪里？** A: 所有原始数据、事件、状态都保存在浏览器 `localStorage`，键名 `allergen-dashboard-v1`。清除浏览器数据会删除所有数据，请在清空前先导出备份。
-- **Q: 如何清空重置？** A: 浏览器控制台执行 `localStorage.removeItem('allergen-dashboard-v1')` 然后刷新页面。
+- **Q: 数据存在哪里？** A: 所有原始数据、事件、状态都保存在浏览器 `localStorage`，键名 `allergy-board-store`。清除浏览器数据会删除所有数据，请在清空前先导出备份。
+- **Q: 如何清空重置？** A: 浏览器控制台执行 `localStorage.removeItem('allergy-board-store')` 然后刷新页面。
 - **Q: 为什么导入文件时部分行被跳过？** A: 点击导入结果中的「错误列表」展开，可查看每条被拦截的具体原因和字段值。
 - **Q: 别名如何工作？** A: 所有命中的原料词会先查别名表，映射到统一的标准名后再进行归并。例如「虾子」「虾仁」都会归为「甲壳类」。

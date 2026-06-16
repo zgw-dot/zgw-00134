@@ -241,7 +241,7 @@ export const useBoardStore = create<BoardState>()(
         });
 
         get().regenerateEvents();
-        return { ok: true, errors: [], imported: valid.length };
+        return { ok: true, errors, imported: valid.length };
       },
 
       clearAllData: () => {
@@ -261,3 +261,7 @@ export const useBoardStore = create<BoardState>()(
     }
   )
 );
+
+if (typeof window !== 'undefined') {
+  (window as any).__boardStore = useBoardStore;
+}

@@ -140,5 +140,26 @@ export function resolveAllergenAlias(raw: string, map: AliasMap): AliasResolveRe
     }
   }
 
+  for (const standard of Object.keys(map)) {
+    const trimmedStandard = standard.trim();
+    const normalizedStandard = normalizeAliasName(trimmedStandard);
+    const aliases = map[standard] || [];
+
+    if (normalizedRaw.includes(normalizedStandard) || normalizedStandard.includes(normalizedRaw)) {
+      result.standardName = trimmedStandard;
+      result.matchedAliases = aliases.filter(a => normalizeAliasName(a) !== normalizedStandard);
+      return result;
+    }
+
+    for (const alias of aliases) {
+      const normalizedAlias = normalizeAliasName(alias);
+      if (normalizedAlias.length >= 2 && (normalizedRaw.includes(normalizedAlias) || normalizedAlias.includes(normalizedRaw))) {
+        result.standardName = trimmedStandard;
+        result.matchedAliases = aliases.filter(a => normalizeAliasName(a) !== normalizedStandard);
+        return result;
+      }
+    }
+  }
+
   return result;
 }

@@ -1,0 +1,27 @@
+{
+  "high_filter_banner": "共 1 条事件(总 6 条，已筛选)",
+  "filtered_export_line_count": 2,
+  "store_after_reload": {
+    "filters": {
+      "classes": [],
+      "meal_types": [],
+      "risk_levels": [
+        "high"
+      ],
+      "statuses": [],
+      "search_text": ""
+    },
+    "high_status": "closed",
+    "high_note": "页面复核备注",
+    "high_review_log_count": 1,
+    "storage_keys": [
+      "allergy-board-store"
+    ]
+  },
+  "bad_complaint_error_text": "数据导入\n\n选择对应类型的 JSON 文件进行导入\n\n菜单\n过敏档案\n领餐记录\n投诉\nbad-complaint.json\n17 B\n重新选择\n✗ 1条错误\nJSON 解析失败: 文件内容必须是数组\n关闭",
+  "store_after_reset_reimport": {
+    "event_count": 6,
+    "high_count": 1,
+    "closed_count": 0
+  }
+}
