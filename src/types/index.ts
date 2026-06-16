@@ -130,6 +130,33 @@ export interface UndoSnapshot {
   description: string;
 }
 
+export type SnapshotSourceOrigin =
+  | 'seal'
+  | 'import_copy'
+  | 'import_overwrite'
+  | 'import_skip'
+  | 'branch'
+  | 'overwrite'
+  | 'copy'
+  | 'restore';
+
+export type SnapshotSourceImportDecision =
+  | 'overwrite'
+  | 'copy'
+  | 'branch'
+  | 'skip'
+  | 'cancel'
+  | 'keep_existing';
+
+export interface SnapshotSource {
+  original_name: string;
+  current_name: string;
+  parent_snapshot_provenance_id?: string;
+  branch_source: SnapshotSourceOrigin;
+  import_decision?: SnapshotSourceImportDecision;
+  is_original: boolean;
+}
+
 export interface ReviewSnapshot {
   snapshot_id: string;
   name: string;
@@ -138,6 +165,7 @@ export interface ReviewSnapshot {
   events: RiskEvent[];
   risk_stats: { high: number; medium: number; low: number };
   import_batches: ImportBatch[];
+  source: SnapshotSource;
 }
 
 export type SnapshotOpType = 'seal' | 'import' | 'overwrite' | 'restore' | 'undo_restore';
@@ -183,6 +211,7 @@ export interface SealedEventConclusion {
     matched_aliases: string[];
   };
   event_snapshot: RiskEvent;
+  source: SnapshotSource;
 }
 
 export interface SealedConclusionRestoreUndo {

@@ -3,7 +3,7 @@ import { useBoardStore } from '@/store';
 import { cn } from '@/lib/utils';
 import { formatTime } from '@/utils/date';
 import { downloadBlob } from '@/utils/exporters';
-import type { SealedEventConclusion, SealedConclusionConflict, RiskLevel } from '@/types';
+import type { SealedEventConclusion, SealedConclusionConflict, RiskLevel, SnapshotSource } from '@/types';
 import {
   X,
   FileCheck,
@@ -25,6 +25,14 @@ import {
 
 type SortKey = 'snapshot_name' | 'sealed_at' | 'risk_level' | 'status';
 type SortDir = 'asc' | 'desc';
+
+function getSourceDisplayName(item: { source?: SnapshotSource; name?: string; snapshot_name?: string }): string {
+  return item.source?.current_name || item.name || item.snapshot_name || '';
+}
+
+function getSourceOriginalName(item: { source?: SnapshotSource; name?: string; snapshot_name?: string }): string | undefined {
+  return item.source?.original_name;
+}
 
 interface SealedConclusionPanelProps {
   open: boolean;
@@ -76,7 +84,7 @@ export default function SealedConclusionPanel({ open, onClose, onViewDetail, onC
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const snapshotOptions = useMemo(() => {
-    const set = new Set(sealedConclusions.map(c => c.snapshot_name));
+    const set = new Set(sealedConclusions.map(c => getSourceDisplayName(c)));
     return Array.from(set).sort();
   }, [sealedConclusions]);
 
@@ -85,7 +93,7 @@ export default function SealedConclusionPanel({ open, onClose, onViewDetail, onC
     if (searchText.trim()) {
       const q = searchText.trim().toLowerCase();
       list = list.filter(c =>
-        c.snapshot_name.toLowerCase().includes(q) ||
+        getSourceDisplayName(c).toLowerCase().includes(q) ||
         c.event_id.toLowerCase().includes(q) ||
         c.evidence_summary.canonical_allergen.toLowerCase().includes(q) ||
         c.latest_note.toLowerCase().includes(q)
@@ -98,14 +106,14 @@ export default function SealedConclusionPanel({ open, onClose, onViewDetail, onC
       list = list.filter(c => c.status === filterStatus);
     }
     if (filterSnapshot) {
-      list = list.filter(c => c.snapshot_name === filterSnapshot);
+      list = list.filter(c => getSourceDisplayName(c) === filterSnapshot);
     }
     list.sort((a, b) => {
       let va: string | number, vb: string | number;
       switch (sortKey) {
         case 'snapshot_name':
-          va = a.snapshot_name;
-          vb = b.snapshot_name;
+          va = getSourceDisplayName(a);
+          vb = getSourceDisplayName(b);
           break;
         case 'sealed_at':
           va = a.sealed_at;
@@ -143,7 +151,7 @@ export default function SealedConclusionPanel({ open, onClose, onViewDetail, onC
     const json = exportSealedConclusionsJson([id]);
     const conc = sealedConclusions.find(c => c.conclusion_id === id);
     const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
-    downloadBlob(blob, `conclusion-${conc?.snapshot_name || id}.json`);
+    downloadBlob(blob, `conclusion-${getSourceDisplayName(conc) || id}.json`);
   };
 
   const handleImportFile = useCallback(async (file: File) => {
@@ -356,7 +364,7 @@ export default function SealedConclusionPanel({ open, onClose, onViewDetail, onC
                   {sorted.map(conc => (
                     <tr key={conc.conclusion_id} className="border-b border-slate-700/40 hover:bg-slate-700/30 transition-colors">
                       <td className="px-4 py-2.5">
-                        <div className="font-medium text-slate-200 truncate max-w-[150px]" title={conc.snapshot_name}>{conc.snapshot_name}</div>
+                        <div className="font-medium text-slate-200 truncate max-w-[150px]" title={getSourceDisplayName(conc)}>{getSourceDisplayName(conc)}</div>
                       </td>
                       <td className="px-3 py-2.5 text-xs text-slate-400">
                         <div className="flex items-center gap-1">

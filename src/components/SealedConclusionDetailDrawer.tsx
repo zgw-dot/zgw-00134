@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { SealedEventConclusion, RiskEvent, RiskLevel, EventStatus } from '@/types';
+import type { SealedEventConclusion, RiskEvent, RiskLevel, EventStatus, SnapshotSource } from '@/types';
 import { cn } from '@/lib/utils';
 import { formatTime } from '@/utils/date';
 import { useBoardStore } from '@/store';
@@ -20,6 +20,14 @@ import {
   FileText,
   AlertCircle,
 } from 'lucide-react';
+
+function getSourceDisplayName(item: { source?: SnapshotSource; name?: string; snapshot_name?: string }): string {
+  return item.source?.current_name || item.name || item.snapshot_name || '';
+}
+
+function getSourceOriginalName(item: { source?: SnapshotSource; name?: string; snapshot_name?: string }): string | undefined {
+  return item.source?.original_name;
+}
 
 interface SealedConclusionDetailDrawerProps {
   conclusion: SealedEventConclusion | null;
@@ -134,7 +142,7 @@ export default function SealedConclusionDetailDrawer({ conclusion, onClose }: Se
               )}
             </div>
             <div className="text-xs text-slate-500 truncate mt-0.5">
-              快照: {conclusion.snapshot_name} · 事件: {conclusion.event_id.slice(0, 16)}...
+              快照: {getSourceDisplayName(conclusion)} · 事件: {conclusion.event_id.slice(0, 16)}...
             </div>
           </div>
           <button type="button" onClick={onClose} className={cn(

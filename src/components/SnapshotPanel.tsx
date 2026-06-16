@@ -3,7 +3,7 @@ import { useBoardStore } from '@/store';
 import { cn } from '@/lib/utils';
 import { formatTime } from '@/utils/date';
 import { downloadBlob } from '@/utils/exporters';
-import type { ReviewSnapshot, SnapshotConflict, RiskLevel } from '@/types';
+import type { ReviewSnapshot, SnapshotConflict, RiskLevel, SnapshotSource } from '@/types';
 import {
   X,
   Camera,
@@ -23,6 +23,14 @@ import {
 
 type SortKey = 'name' | 'created_at' | 'high_risk' | 'medium_risk' | 'low_risk';
 type SortDir = 'asc' | 'desc';
+
+function getSourceDisplayName(item: { source?: SnapshotSource; name?: string; snapshot_name?: string }): string {
+  return item.source?.current_name || item.name || item.snapshot_name || '';
+}
+
+function getSourceOriginalName(item: { source?: SnapshotSource; name?: string; snapshot_name?: string }): string | undefined {
+  return item.source?.original_name;
+}
 
 interface SnapshotPanelProps {
   open: boolean;
@@ -73,7 +81,7 @@ export default function SnapshotPanel({ open, onClose, onPreview, onConflict, on
     let list = [...snapshots];
     if (searchText.trim()) {
       const q = searchText.trim().toLowerCase();
-      list = list.filter(s => s.name.toLowerCase().includes(q));
+      list = list.filter(s => getSourceDisplayName(s).toLowerCase().includes(q));
     }
     if (filterRisk) {
       list = list.filter(s => s.risk_stats[filterRisk] > 0);
@@ -82,8 +90,8 @@ export default function SnapshotPanel({ open, onClose, onPreview, onConflict, on
       let va: string | number, vb: string | number;
       switch (sortKey) {
         case 'name':
-          va = a.name;
-          vb = b.name;
+          va = getSourceDisplayName(a);
+          vb = getSourceDisplayName(b);
           break;
         case 'created_at':
           va = a.created_at;
@@ -130,7 +138,7 @@ export default function SnapshotPanel({ open, onClose, onPreview, onConflict, on
     const json = exportSnapshotsJson([id]);
     const snap = snapshots.find(s => s.snapshot_id === id);
     const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
-    downloadBlob(blob, `snapshot-${snap?.name || id}.json`);
+    downloadBlob(blob, `snapshot-${getSourceDisplayName(snap) || id}.json`);
   };
 
   const handleImportFile = useCallback(async (file: File) => {
@@ -356,7 +364,7 @@ export default function SnapshotPanel({ open, onClose, onPreview, onConflict, on
                   {sorted.map(snap => (
                     <tr key={snap.snapshot_id} className="border-b border-slate-700/40 hover:bg-slate-700/30 transition-colors">
                       <td className="px-5 py-2.5">
-                        <div className="font-medium text-slate-200 truncate max-w-[180px]" title={snap.name}>{snap.name}</div>
+                        <div className="font-medium text-slate-200 truncate max-w-[180px]" title={getSourceDisplayName(snap)}>{getSourceDisplayName(snap)}</div>
                       </td>
                       <td className="px-3 py-2.5 text-xs text-slate-400">
                         <div className="flex items-center gap-1">

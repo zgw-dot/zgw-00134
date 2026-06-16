@@ -23,6 +23,9 @@ import type {
   SealedConclusionConflict,
   SealedConclusionImportResolution,
   SealedConclusionRestoreUndo,
+  SnapshotSource,
+  SnapshotSourceOrigin,
+  SnapshotSourceImportDecision,
   ProvenanceRecord,
   ProvenanceGenerationMethod,
   ProvenanceEntityType,
@@ -633,6 +636,7 @@ export const useBoardStore = create<BoardState>()(
           events: visibleEvents.map(e => ({ ...e })),
           risk_stats,
           import_batches: state.importBatches.map(b => ({ ...b })),
+          source: { original_name: name, current_name: name, branch_source: 'seal', is_original: true },
         };
         const opLog: SnapshotOpLog = {
           id: genId('op'),
@@ -664,6 +668,7 @@ export const useBoardStore = create<BoardState>()(
               matched_aliases: [...e.matched_aliases],
             },
             event_snapshot: { ...e },
+            source: { original_name: name, current_name: name, branch_source: 'seal', is_original: true },
           };
         });
 
@@ -732,7 +737,7 @@ export const useBoardStore = create<BoardState>()(
         if (resolution === 'overwrite') {
           const overwritten = state.snapshots.find(s => s.name === incoming.name);
           const filtered = state.snapshots.filter(s => s.name !== incoming.name);
-          const toAdd = { ...incoming };
+          const toAdd = { ...incoming, source: { ...incoming.source, current_name: incoming.name, branch_source: 'import_overwrite' as SnapshotSourceOrigin, import_decision: 'overwrite' as SnapshotSourceImportDecision, is_original: false } };
           const opLog: SnapshotOpLog = {
             id: genId('op'),
             op: 'overwrite',
@@ -787,6 +792,7 @@ export const useBoardStore = create<BoardState>()(
             ...incoming,
             snapshot_id: genId('snap'),
             name: finalName,
+            source: { original_name: incoming.source?.original_name || baseName, current_name: finalName, branch_source: 'import_copy', import_decision: 'copy', is_original: false },
           };
           const opLog: SnapshotOpLog = {
             id: genId('op'),
@@ -1055,6 +1061,7 @@ export const useBoardStore = create<BoardState>()(
             toAdd.push({
               ...incoming,
               conclusion_id: existing.conclusion_id,
+              source: { ...incoming.source, current_name: incoming.snapshot_name, branch_source: 'import_overwrite', import_decision: 'overwrite', is_original: false },
             });
             opLogs.push({
               id: genId('op-c'),
@@ -1080,6 +1087,7 @@ export const useBoardStore = create<BoardState>()(
               ...incoming,
               conclusion_id: genId('conc'),
               snapshot_name: finalName,
+              source: { original_name: incoming.source?.original_name || baseName, current_name: finalName, branch_source: 'import_copy', import_decision: 'copy', is_original: false },
             });
             opLogs.push({
               id: genId('op-c'),
@@ -1099,6 +1107,7 @@ export const useBoardStore = create<BoardState>()(
             toAdd.push({
               ...incoming,
               conclusion_id: newId,
+              source: incoming.source || { original_name: incoming.snapshot_name, current_name: incoming.snapshot_name, branch_source: 'import_copy', is_original: false },
             });
             opLogs.push({
               id: genId('op-c'),
@@ -1237,6 +1246,7 @@ export const useBoardStore = create<BoardState>()(
             snapshot_id: genId('snap'),
             name: newName,
             created_at: new Date().toISOString(),
+            source: { original_name: sourceSnap.source?.original_name || sourceSnap.name, current_name: newName, branch_source: 'branch', import_decision: 'branch', is_original: false, parent_snapshot_provenance_id: provenanceId },
           };
           
           set(s => ({
@@ -1252,6 +1262,7 @@ export const useBoardStore = create<BoardState>()(
               snapshot_id: newSnap.snapshot_id,
               snapshot_name: newName,
               sealed_at: new Date().toISOString(),
+              source: { original_name: c.source?.original_name || sourceSnap.name, current_name: newName, branch_source: 'branch' as SnapshotSourceOrigin, import_decision: 'branch' as SnapshotSourceImportDecision, is_original: false, parent_snapshot_provenance_id: provenanceId },
             }));
 
           set(s => ({
@@ -1266,6 +1277,7 @@ export const useBoardStore = create<BoardState>()(
             conclusion_id: genId('conc'),
             snapshot_name: newName,
             sealed_at: new Date().toISOString(),
+            source: { original_name: sourceConc.source?.original_name || sourceConc.snapshot_name, current_name: newName, branch_source: 'branch', import_decision: 'branch', is_original: false, parent_snapshot_provenance_id: provenanceId },
           };
           
           set(s => ({
@@ -1302,12 +1314,12 @@ export const useBoardStore = create<BoardState>()(
           set(s => ({
             snapshots: s.snapshots.map(snap =>
               snap.snapshot_id === record.entity_id
-                ? { ...snap, name: newName }
+                ? { ...snap, name: newName, source: { ...snap.source, current_name: newName } }
                 : snap
             ),
             sealedConclusions: s.sealedConclusions.map(c =>
               c.snapshot_id === record.entity_id
-                ? { ...c, snapshot_name: newName }
+                ? { ...c, snapshot_name: newName, source: { ...c.source, current_name: newName } }
                 : c
             ),
           }));
@@ -1432,7 +1444,7 @@ export const useBoardStore = create<BoardState>()(
             set(s => ({
               snapshots: s.snapshots.map(snap =>
                 snap.snapshot_id === target.entity_id
-                  ? { ...incomingSnap, snapshot_id: target.entity_id, name: target.current_name }
+                  ? { ...incomingSnap, snapshot_id: target.entity_id, name: target.current_name, source: { ...snap.source, current_name: target.current_name, branch_source: 'overwrite', import_decision: 'overwrite' } }
                   : snap
               ),
             }));
@@ -1447,6 +1459,7 @@ export const useBoardStore = create<BoardState>()(
                   conclusion_id: tc.conclusion_id,
                   snapshot_id: tc.snapshot_id,
                   snapshot_name: tc.snapshot_name,
+                  source: { ...tc.source, current_name: tc.snapshot_name },
                 };
               }
               return tc;
@@ -1497,6 +1510,7 @@ export const useBoardStore = create<BoardState>()(
               snapshot_id: newId,
               name: finalName,
               created_at: now,
+              source: { original_name: snap.source?.original_name || snap.name, current_name: finalName, branch_source: 'branch', import_decision: 'branch', is_original: false },
             };
 
             set(s => ({
@@ -1535,6 +1549,7 @@ export const useBoardStore = create<BoardState>()(
               snapshot_id: newSnapId,
               snapshot_name: newSnap?.name || conc.snapshot_name,
               sealed_at: now,
+              source: { original_name: conc.source?.original_name || conc.snapshot_name, current_name: newSnap?.name || conc.snapshot_name, branch_source: 'branch', import_decision: 'branch', is_original: false },
             };
 
             set(s => ({
@@ -1745,6 +1760,34 @@ export const useBoardStore = create<BoardState>()(
             (state as any).selectedEventIds = new Set((state as any).selectedEventIds);
           } else {
             (state as any).selectedEventIds = new Set();
+          }
+          for (const snap of (state as any).snapshots || []) {
+            if (!snap.source) {
+              (snap as any).source = {
+                original_name: snap.name,
+                current_name: snap.name,
+                branch_source: 'seal' as SnapshotSourceOrigin,
+                is_original: true,
+              };
+            }
+          }
+          for (const conc of (state as any).sealedConclusions || []) {
+            if (!conc.source) {
+              const prov = (state as any).provenanceRecords?.find(
+                (r: any) => r.entity_type === 'conclusion' && r.entity_id === conc.conclusion_id
+              );
+              (conc as any).source = {
+                original_name: prov?.original_name || conc.snapshot_name,
+                current_name: prov?.current_name || conc.snapshot_name,
+                branch_source: (prov?.generation_method || 'seal') as SnapshotSourceOrigin,
+                import_decision: prov?.generation_method?.startsWith('import_')
+                  ? (prov.generation_method === 'import_copy' ? 'copy' as SnapshotSourceImportDecision
+                    : prov.generation_method === 'import_overwrite' ? 'overwrite' as SnapshotSourceImportDecision
+                    : 'skip' as SnapshotSourceImportDecision)
+                  : undefined,
+                is_original: prov?.is_original ?? !prov?.parent_provenance_id,
+              };
+            }
           }
         }
       },

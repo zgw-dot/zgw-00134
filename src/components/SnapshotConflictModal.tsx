@@ -1,4 +1,4 @@
-import type { ReviewSnapshot, SnapshotConflict, SnapshotImportResolution } from '@/types';
+import type { ReviewSnapshot, SnapshotConflict, SnapshotImportResolution, SnapshotSource } from '@/types';
 import { cn } from '@/lib/utils';
 import {
   AlertTriangle,
@@ -6,6 +6,14 @@ import {
   Replace,
   XCircle,
 } from 'lucide-react';
+
+function getSourceDisplayName(item: { source?: SnapshotSource; name?: string; snapshot_name?: string }): string {
+  return item.source?.current_name || item.name || item.snapshot_name || '';
+}
+
+function getSourceOriginalName(item: { source?: SnapshotSource; name?: string; snapshot_name?: string }): string | undefined {
+  return item.source?.original_name;
+}
 
 interface SnapshotConflictModalProps {
   snapshot: ReviewSnapshot;
@@ -22,7 +30,7 @@ export default function SnapshotConflictModal({ snapshot, conflict, onResolve }:
           <div className="flex-1">
             <h3 className="text-sm font-semibold text-amber-200">导入冲突</h3>
             <p className="mt-1 text-xs text-amber-300/80">
-              快照「{snapshot.name}」与现有数据存在冲突，请选择处理方式。
+              快照「{getSourceDisplayName(snapshot)}」与现有数据存在冲突，请选择处理方式。
             </p>
           </div>
         </div>
@@ -35,7 +43,7 @@ export default function SnapshotConflictModal({ snapshot, conflict, onResolve }:
                 <span className="font-medium">名称冲突</span>
               </div>
               <div className="mt-1 text-xs text-amber-300/70">
-                已存在同名快照「{snapshot.name}」
+                已存在同名快照「{getSourceDisplayName(snapshot)}」
               </div>
             </div>
           )}

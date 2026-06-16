@@ -1,4 +1,4 @@
-import type { SealedEventConclusion, SealedConclusionConflict, SealedConclusionImportResolution } from '@/types';
+import type { SealedEventConclusion, SealedConclusionConflict, SealedConclusionImportResolution, SnapshotSource } from '@/types';
 import { cn } from '@/lib/utils';
 import {
   X,
@@ -11,6 +11,14 @@ import {
   FileCheck,
   Clock,
 } from 'lucide-react';
+
+function getSourceDisplayName(item: { source?: SnapshotSource; name?: string; snapshot_name?: string }): string {
+  return item.source?.current_name || item.name || item.snapshot_name || '';
+}
+
+function getSourceOriginalName(item: { source?: SnapshotSource; name?: string; snapshot_name?: string }): string | undefined {
+  return item.source?.original_name;
+}
 
 interface SealedConclusionConflictModalProps {
   conclusions: SealedEventConclusion[];
@@ -56,7 +64,7 @@ export default function SealedConclusionConflictModal({ conclusions, conflict, o
                   </div>
                   <div className="space-y-1 text-xs text-amber-200/70 mt-2">
                     {conflict.snapshot_name_conflict && (
-                      <div>• 存在同名快照：{sampleConclusion?.snapshot_name}</div>
+                      <div>• 存在同名快照：{getSourceDisplayName(sampleConclusion)}</div>
                     )}
                     {conflict.event_id_conflicts.length > 0 && (
                       <div>• {conflict.event_id_conflicts.length} 个事件已存在结论副本</div>
@@ -77,7 +85,7 @@ export default function SealedConclusionConflictModal({ conclusions, conflict, o
               <div className="text-xs text-slate-400 space-y-1">
                 <div className="flex items-center gap-2">
                   <Clock className="h-3 w-3 text-slate-500" />
-                  <span>快照: {sampleConclusion?.snapshot_name}</span>
+                  <span>快照: {getSourceDisplayName(sampleConclusion)}</span>
                 </div>
                 <div className="text-slate-500 pl-5">事件数: {conclusions.length} 条</div>
                 <div className="text-slate-500 pl-5">封存时间: {sampleConclusion && new Date(sampleConclusion.sealed_at).toLocaleString()}</div>

@@ -393,6 +393,15 @@ function DetailPanel({
             </div>
           </div>
 
+          {provenance.parent_provenance_id && (
+            <div className="space-y-2">
+              <div className="text-xs font-medium text-slate-400">父级来历</div>
+              <div className="rounded-md border border-slate-700 bg-slate-800/40 p-3 text-xs">
+                <div className="text-slate-500 font-mono text-[10px]">{provenance.parent_provenance_id}</div>
+              </div>
+            </div>
+          )}
+
           {provenance.import_batch_name && (
             <div className="space-y-2">
               <div className="text-xs font-medium text-slate-400">导入批次</div>
