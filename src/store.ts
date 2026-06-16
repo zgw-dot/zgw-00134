@@ -23,6 +23,16 @@ import type {
   SealedConclusionConflict,
   SealedConclusionImportResolution,
   SealedConclusionRestoreUndo,
+  ProvenanceRecord,
+  ProvenanceGenerationMethod,
+  ProvenanceEntityType,
+  ProvenanceConflictDecision,
+  ProvenanceTimelineNode,
+  ProvenanceImportConflict,
+  ProvenanceImportResolution,
+  ProvenanceExportPackage,
+  ProvenanceSummary,
+  TemporaryRestoreSession,
 } from '@/types';
 import { generateRiskEvents } from '@/utils/engine';
 import { applyFilters } from '@/utils/filters';
@@ -54,6 +64,8 @@ interface BoardState {
   sealedConclusions: SealedEventConclusion[];
   sealedConclusionOpLogs: SealedConclusionOpLog[];
   sealedConclusionRestoreUndo: SealedConclusionRestoreUndo | null;
+  provenanceRecords: ProvenanceRecord[];
+  temporaryRestoreSession: TemporaryRestoreSession | null;
 
   setAliasMap: (map: AllergenAliasMap) => { ok: boolean; errors: string[] };
   regenerateEvents: () => void;
@@ -113,6 +125,50 @@ interface BoardState {
   getSealedConclusionOpLogs: () => SealedConclusionOpLog[];
   exportSealedConclusionsJson: (conclusionIds?: string[]) => string;
   deleteSealedConclusion: (conclusionId: string) => void;
+
+  generateIdentitySignature: (
+    entityType: ProvenanceEntityType,
+    name: string,
+    eventIds: string[]
+  ) => string;
+
+  createProvenanceRecord: (
+    entityType: ProvenanceEntityType,
+    entityId: string,
+    name: string,
+    method: ProvenanceGenerationMethod,
+    eventCount: number,
+    parentProvenanceId?: string,
+    conflictDecisions?: ProvenanceConflictDecision[],
+    importBatch?: { id: string; name: string }
+  ) => ProvenanceRecord;
+
+  getProvenanceSummaries: () => ProvenanceSummary[];
+  getProvenanceTimeline: (rootProvenanceId: string) => ProvenanceTimelineNode | null;
+  getProvenanceById: (provenanceId: string) => ProvenanceRecord | undefined;
+  getProvenanceByEntity: (entityType: ProvenanceEntityType, entityId: string) => ProvenanceRecord | undefined;
+  getProvenanceChildren: (parentProvenanceId: string) => ProvenanceRecord[];
+  branchProvenance: (provenanceId: string, newName: string) => ProvenanceRecord | null;
+  updateProvenanceName: (provenanceId: string, newName: string) => boolean;
+  updateProvenancePlaybackTime: (provenanceId: string) => void;
+
+  checkProvenanceImportConflict: (pkg: ProvenanceExportPackage) => ProvenanceImportConflict;
+  importProvenancePackage: (
+    pkg: ProvenanceExportPackage,
+    resolution: ProvenanceImportResolution,
+    targetProvenanceId?: string
+  ) => { ok: boolean; imported: number; reason?: string };
+  exportProvenancePackage: (provenanceIds: string[]) => string;
+
+  temporaryRestore: (provenanceId: string) => boolean;
+  discardTemporaryRestore: () => boolean;
+  canDiscardTemporaryRestore: () => boolean;
+  hasActiveTemporaryRestore: () => boolean;
+
+  addConflictDecision: (
+    provenanceId: string,
+    decision: ProvenanceConflictDecision
+  ) => boolean;
 }
 
 const defaultAliasMap: AllergenAliasMap = {
@@ -152,6 +208,90 @@ export const useBoardStore = create<BoardState>()(
       sealedConclusions: [],
       sealedConclusionOpLogs: [],
       sealedConclusionRestoreUndo: null,
+      provenanceRecords: [],
+      temporaryRestoreSession: null,
+
+      generateIdentitySignature: (
+        entityType: ProvenanceEntityType,
+        name: string,
+        eventIds: string[]
+      ): string => {
+        const sortedIds = [...eventIds].sort().join('|');
+        return contentHash(`${entityType}:${name}:${sortedIds}`);
+      },
+
+      createProvenanceRecord: (
+        entityType: ProvenanceEntityType,
+        entityId: string,
+        name: string,
+        method: ProvenanceGenerationMethod,
+        eventCount: number,
+        parentProvenanceId?: string,
+        conflictDecisions: ProvenanceConflictDecision[] = [],
+        importBatch?: { id: string; name: string }
+      ): ProvenanceRecord => {
+        const state = get();
+        let rootProvenanceId: string;
+        let branchDepth = 0;
+        let isOriginal = true;
+        let originalName = name;
+        let eventIds: string[] = [];
+
+        if (entityType === 'snapshot') {
+          const snap = state.snapshots.find(s => s.snapshot_id === entityId);
+          if (snap) {
+            eventIds = snap.events.map(e => e.event_id);
+          }
+        } else {
+          const conc = state.sealedConclusions.find(c => c.conclusion_id === entityId);
+          if (conc) {
+            eventIds = [conc.event_id];
+          }
+        }
+
+        if (parentProvenanceId) {
+          const parent = state.provenanceRecords.find(p => p.provenance_id === parentProvenanceId);
+          if (parent) {
+            rootProvenanceId = parent.root_provenance_id;
+            branchDepth = parent.branch_depth + 1;
+            isOriginal = false;
+            originalName = parent.original_name;
+          } else {
+            rootProvenanceId = genId('prov');
+          }
+        } else {
+          rootProvenanceId = genId('prov');
+        }
+
+        const record: ProvenanceRecord = {
+          provenance_id: genId('prov'),
+          entity_type: entityType,
+          entity_id: entityId,
+          original_name: originalName,
+          current_name: name,
+          generation_method: method,
+          event_count: eventCount,
+          conflict_decisions: conflictDecisions,
+          parent_provenance_id: parentProvenanceId,
+          root_provenance_id: rootProvenanceId,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          is_original: isOriginal,
+          branch_depth: branchDepth,
+          identity_signature: state.generateIdentitySignature(entityType, name, eventIds),
+        };
+
+        if (importBatch) {
+          record.import_batch_id = importBatch.id;
+          record.import_batch_name = importBatch.name;
+        }
+
+        set(s => ({
+          provenanceRecords: [...s.provenanceRecords, record],
+        }));
+
+        return record;
+      },
 
       setAliasMap: (map: AllergenAliasMap) => {
         const errors = validateAliasMap(map as AliasMap);
@@ -544,6 +684,26 @@ export const useBoardStore = create<BoardState>()(
           sealedConclusions: [...s.sealedConclusions, ...sealedConclusions],
           sealedConclusionOpLogs: [...s.sealedConclusionOpLogs, ...sealedOpLogs],
         }));
+
+        const stateAfter = get();
+        stateAfter.createProvenanceRecord(
+          'snapshot',
+          snapshot.snapshot_id,
+          snapshot.name,
+          'seal',
+          visibleEvents.length
+        );
+
+        for (const conc of sealedConclusions) {
+          stateAfter.createProvenanceRecord(
+            'conclusion',
+            conc.conclusion_id,
+            `${snapshot.name} - ${conc.event_id.slice(0, 8)}`,
+            'seal',
+            1
+          );
+        }
+
         return snapshot;
       },
 
@@ -583,10 +743,34 @@ export const useBoardStore = create<BoardState>()(
               ? `覆盖快照「${incoming.name}」(原ID: ${overwritten.snapshot_id})`
               : `导入并覆盖快照「${incoming.name}」`,
           };
+
+          const conflictDecisions: ProvenanceConflictDecision[] = [];
+          if (overwritten) {
+            conflictDecisions.push({
+              type: 'name',
+              existing_id: overwritten.snapshot_id,
+              existing_name: overwritten.name,
+              resolution: 'overwrite',
+              resolved_at: new Date().toISOString(),
+            });
+          }
+
           set(s => ({
             snapshots: [...filtered, toAdd],
             snapshotOpLogs: [...s.snapshotOpLogs, opLog],
           }));
+
+          const stateAfter = get();
+          stateAfter.createProvenanceRecord(
+            'snapshot',
+            toAdd.snapshot_id,
+            toAdd.name,
+            'import_overwrite',
+            toAdd.events.length,
+            undefined,
+            conflictDecisions
+          );
+
           return { ok: true };
         }
 
@@ -612,10 +796,31 @@ export const useBoardStore = create<BoardState>()(
             timestamp: new Date().toISOString(),
             detail: `另存快照副本「${finalName}」(原始名: ${baseName})`,
           };
+
+          const conflictDecisions: ProvenanceConflictDecision[] = [{
+            type: 'name',
+            existing_id: incoming.snapshot_id,
+            existing_name: baseName,
+            resolution: 'branch',
+            resolved_at: new Date().toISOString(),
+          }];
+
           set(s => ({
             snapshots: [...s.snapshots, copy],
             snapshotOpLogs: [...s.snapshotOpLogs, opLog],
           }));
+
+          const stateAfter = get();
+          stateAfter.createProvenanceRecord(
+            'snapshot',
+            copy.snapshot_id,
+            copy.name,
+            'import_copy',
+            copy.events.length,
+            undefined,
+            conflictDecisions
+          );
+
           return { ok: true };
         }
 
@@ -956,6 +1161,561 @@ export const useBoardStore = create<BoardState>()(
           sealedConclusions: s.sealedConclusions.filter(c => c.conclusion_id !== conclusionId),
         }));
       },
+
+      getProvenanceSummaries: (): ProvenanceSummary[] => {
+        const state = get();
+        const records = state.provenanceRecords;
+        const childMap = new Map<string, number>();
+        
+        for (const r of records) {
+          if (r.parent_provenance_id) {
+            childMap.set(r.parent_provenance_id, (childMap.get(r.parent_provenance_id) || 0) + 1);
+          }
+        }
+
+        return records.map(r => ({
+          provenance_id: r.provenance_id,
+          entity_type: r.entity_type,
+          original_name: r.original_name,
+          current_name: r.current_name,
+          generation_method: r.generation_method,
+          event_count: r.event_count,
+          created_at: r.created_at,
+          last_playback_at: r.last_playback_at,
+          is_original: r.is_original,
+          branch_depth: r.branch_depth,
+          has_children: (childMap.get(r.provenance_id) || 0) > 0,
+          conflict_count: r.conflict_decisions.length,
+        }));
+      },
+
+      getProvenanceTimeline: (rootProvenanceId: string): ProvenanceTimelineNode | null => {
+        const state = get();
+        const records = state.provenanceRecords;
+        
+        const root = records.find(r => r.provenance_id === rootProvenanceId || r.root_provenance_id === rootProvenanceId && !r.parent_provenance_id);
+        if (!root) return null;
+
+        const buildTree = (parentId: string): ProvenanceTimelineNode[] => {
+          const children = records.filter(r => r.parent_provenance_id === parentId);
+          return children.map(child => ({
+            provenance: child,
+            children: buildTree(child.provenance_id),
+          }));
+        };
+
+        return {
+          provenance: root,
+          children: buildTree(root.provenance_id),
+        };
+      },
+
+      getProvenanceById: (provenanceId: string): ProvenanceRecord | undefined => {
+        return get().provenanceRecords.find(r => r.provenance_id === provenanceId);
+      },
+
+      getProvenanceByEntity: (entityType: ProvenanceEntityType, entityId: string): ProvenanceRecord | undefined => {
+        return get().provenanceRecords.find(r => r.entity_type === entityType && r.entity_id === entityId);
+      },
+
+      getProvenanceChildren: (parentProvenanceId: string): ProvenanceRecord[] => {
+        return get().provenanceRecords.filter(r => r.parent_provenance_id === parentProvenanceId);
+      },
+
+      branchProvenance: (provenanceId: string, newName: string): ProvenanceRecord | null => {
+        const state = get();
+        const source = state.provenanceRecords.find(r => r.provenance_id === provenanceId);
+        if (!source) return null;
+
+        let newEntityId: string;
+        if (source.entity_type === 'snapshot') {
+          const sourceSnap = state.snapshots.find(s => s.snapshot_id === source.entity_id);
+          if (!sourceSnap) return null;
+          
+          const newSnap: ReviewSnapshot = {
+            ...sourceSnap,
+            snapshot_id: genId('snap'),
+            name: newName,
+            created_at: new Date().toISOString(),
+          };
+          
+          set(s => ({
+            snapshots: [...s.snapshots, newSnap],
+          }));
+          newEntityId = newSnap.snapshot_id;
+
+          const newConclusions = state.sealedConclusions
+            .filter(c => c.snapshot_id === source.entity_id)
+            .map(c => ({
+              ...c,
+              conclusion_id: genId('conc'),
+              snapshot_id: newSnap.snapshot_id,
+              snapshot_name: newName,
+              sealed_at: new Date().toISOString(),
+            }));
+
+          set(s => ({
+            sealedConclusions: [...s.sealedConclusions, ...newConclusions],
+          }));
+        } else {
+          const sourceConc = state.sealedConclusions.find(c => c.conclusion_id === source.entity_id);
+          if (!sourceConc) return null;
+          
+          const newConc: SealedEventConclusion = {
+            ...sourceConc,
+            conclusion_id: genId('conc'),
+            snapshot_name: newName,
+            sealed_at: new Date().toISOString(),
+          };
+          
+          set(s => ({
+            sealedConclusions: [...s.sealedConclusions, newConc],
+          }));
+          newEntityId = newConc.conclusion_id;
+        }
+
+        const stateAfter = get();
+        return stateAfter.createProvenanceRecord(
+          source.entity_type,
+          newEntityId,
+          newName,
+          'branch',
+          source.event_count,
+          provenanceId
+        );
+      },
+
+      updateProvenanceName: (provenanceId: string, newName: string): boolean => {
+        const state = get();
+        const record = state.provenanceRecords.find(r => r.provenance_id === provenanceId);
+        if (!record) return false;
+
+        set(s => ({
+          provenanceRecords: s.provenanceRecords.map(r =>
+            r.provenance_id === provenanceId
+              ? { ...r, current_name: newName, updated_at: new Date().toISOString() }
+              : r
+          ),
+        }));
+
+        if (record.entity_type === 'snapshot') {
+          set(s => ({
+            snapshots: s.snapshots.map(snap =>
+              snap.snapshot_id === record.entity_id
+                ? { ...snap, name: newName }
+                : snap
+            ),
+            sealedConclusions: s.sealedConclusions.map(c =>
+              c.snapshot_id === record.entity_id
+                ? { ...c, snapshot_name: newName }
+                : c
+            ),
+          }));
+        }
+
+        return true;
+      },
+
+      updateProvenancePlaybackTime: (provenanceId: string): void => {
+        set(s => ({
+          provenanceRecords: s.provenanceRecords.map(r =>
+            r.provenance_id === provenanceId
+              ? { ...r, last_playback_at: new Date().toISOString(), updated_at: new Date().toISOString() }
+              : r
+          ),
+        }));
+      },
+
+      addConflictDecision: (provenanceId: string, decision: ProvenanceConflictDecision): boolean => {
+        const state = get();
+        const record = state.provenanceRecords.find(r => r.provenance_id === provenanceId);
+        if (!record) return false;
+
+        set(s => ({
+          provenanceRecords: s.provenanceRecords.map(r =>
+            r.provenance_id === provenanceId
+              ? {
+                  ...r,
+                  conflict_decisions: [...r.conflict_decisions, decision],
+                  updated_at: new Date().toISOString(),
+                }
+              : r
+          ),
+        }));
+        return true;
+      },
+
+      checkProvenanceImportConflict: (pkg: ProvenanceExportPackage): ProvenanceImportConflict => {
+        const state = get();
+        const existingIds = new Set(state.provenanceRecords.map(r => r.provenance_id));
+        const existingEntityIds = new Set([
+          ...state.snapshots.map(s => s.snapshot_id),
+          ...state.sealedConclusions.map(c => c.conclusion_id),
+        ]);
+        const existingNames = new Set([
+          ...state.snapshots.map(s => s.name),
+          ...state.sealedConclusions.map(c => c.snapshot_name),
+        ]);
+        const existingSignatures = new Map(state.provenanceRecords.map(r => [r.identity_signature, r.provenance_id]));
+
+        const provenance_id_conflicts: string[] = [];
+        const entity_id_conflicts: string[] = [];
+        const name_conflicts: string[] = [];
+        const identity_conflicts: {
+          incoming_signature: string;
+          existing_signature: string;
+          existing_provenance_id: string;
+        }[] = [];
+
+        for (const record of pkg.provenance_records) {
+          if (existingIds.has(record.provenance_id)) {
+            provenance_id_conflicts.push(record.provenance_id);
+          }
+          if (existingEntityIds.has(record.entity_id)) {
+            entity_id_conflicts.push(record.entity_id);
+          }
+          if (existingNames.has(record.current_name)) {
+            name_conflicts.push(record.current_name);
+          }
+          const existingProvId = existingSignatures.get(record.identity_signature);
+          if (existingProvId) {
+            identity_conflicts.push({
+              incoming_signature: record.identity_signature,
+              existing_signature: record.identity_signature,
+              existing_provenance_id: existingProvId,
+            });
+          }
+        }
+
+        return {
+          provenance_id_conflicts,
+          entity_id_conflicts,
+          name_conflicts,
+          identity_conflicts,
+        };
+      },
+
+      importProvenancePackage: (
+        pkg: ProvenanceExportPackage,
+        resolution: ProvenanceImportResolution,
+        targetProvenanceId?: string
+      ): { ok: boolean; imported: number; reason?: string } => {
+        if (resolution === 'cancel') {
+          return { ok: false, imported: 0, reason: '用户取消导入' };
+        }
+
+        const state = get();
+        let imported = 0;
+        const now = new Date().toISOString();
+
+        if (resolution === 'keep_existing') {
+          for (const record of pkg.provenance_records) {
+            state.addConflictDecision(record.provenance_id, {
+              type: 'identity',
+              existing_id: record.provenance_id,
+              existing_name: record.current_name,
+              resolution: 'keep_existing',
+              resolved_at: now,
+            });
+          }
+          return { ok: true, imported: 0 };
+        }
+
+        if (resolution === 'overwrite_target' && targetProvenanceId) {
+          const target = state.provenanceRecords.find(r => r.provenance_id === targetProvenanceId);
+          if (!target) {
+            return { ok: false, imported: 0, reason: '目标来历记录不存在' };
+          }
+
+          const incomingSnap = pkg.snapshots[0];
+          if (incomingSnap && target.entity_type === 'snapshot') {
+            set(s => ({
+              snapshots: s.snapshots.map(snap =>
+                snap.snapshot_id === target.entity_id
+                  ? { ...incomingSnap, snapshot_id: target.entity_id, name: target.current_name }
+                  : snap
+              ),
+            }));
+
+            const targetConclusions = state.sealedConclusions.filter(c => c.snapshot_id === target.entity_id);
+            const incomingConclusions = pkg.conclusions;
+            const updatedConclusions = targetConclusions.map(tc => {
+              const matching = incomingConclusions.find(ic => ic.event_id === tc.event_id);
+              if (matching) {
+                return {
+                  ...matching,
+                  conclusion_id: tc.conclusion_id,
+                  snapshot_id: tc.snapshot_id,
+                  snapshot_name: tc.snapshot_name,
+                };
+              }
+              return tc;
+            });
+
+            set(s => ({
+              sealedConclusions: [
+                ...s.sealedConclusions.filter(c => c.snapshot_id !== target.entity_id),
+                ...updatedConclusions,
+              ],
+            }));
+
+            state.addConflictDecision(targetProvenanceId, {
+              type: 'identity',
+              existing_id: target.entity_id,
+              existing_name: target.current_name,
+              resolution: 'overwrite',
+              resolved_at: now,
+            });
+
+            imported = 1 + updatedConclusions.length;
+          }
+
+          return { ok: true, imported };
+        }
+
+        if (resolution === 'branch') {
+          const existingNames = new Set([
+            ...state.snapshots.map(s => s.name),
+            ...state.sealedConclusions.map(c => c.snapshot_name),
+          ]);
+
+          const idRemap = new Map<string, string>();
+
+          for (const snap of pkg.snapshots) {
+            let finalName = snap.name;
+            let suffix = 1;
+            while (existingNames.has(finalName)) {
+              finalName = `${snap.name} (分支 ${suffix})`;
+              suffix++;
+            }
+
+            const newId = genId('snap');
+            idRemap.set(snap.snapshot_id, newId);
+
+            const newSnap: ReviewSnapshot = {
+              ...snap,
+              snapshot_id: newId,
+              name: finalName,
+              created_at: now,
+            };
+
+            set(s => ({
+              snapshots: [...s.snapshots, newSnap],
+            }));
+
+            const conflictDecisions: ProvenanceConflictDecision[] = [{
+              type: 'name',
+              existing_id: snap.snapshot_id,
+              existing_name: snap.name,
+              resolution: 'branch',
+              resolved_at: now,
+            }];
+
+            const stateAfter = get();
+            stateAfter.createProvenanceRecord(
+              'snapshot',
+              newId,
+              finalName,
+              'branch',
+              snap.events.length,
+              undefined,
+              conflictDecisions
+            );
+            imported++;
+          }
+
+          for (const conc of pkg.conclusions) {
+            const newSnapId = idRemap.get(conc.snapshot_id) || conc.snapshot_id;
+            const newSnap = state.snapshots.find(s => s.snapshot_id === newSnapId);
+            const newId = genId('conc');
+
+            const newConc: SealedEventConclusion = {
+              ...conc,
+              conclusion_id: newId,
+              snapshot_id: newSnapId,
+              snapshot_name: newSnap?.name || conc.snapshot_name,
+              sealed_at: now,
+            };
+
+            set(s => ({
+              sealedConclusions: [...s.sealedConclusions, newConc],
+            }));
+
+            const stateAfter = get();
+            stateAfter.createProvenanceRecord(
+              'conclusion',
+              newId,
+              `${newSnap?.name || conc.snapshot_name} - ${conc.event_id.slice(0, 8)}`,
+              'branch',
+              1
+            );
+            imported++;
+          }
+
+          return { ok: true, imported };
+        }
+
+        return { ok: false, imported: 0, reason: '未知操作' };
+      },
+
+      exportProvenancePackage: (provenanceIds: string[]): string => {
+        const state = get();
+        const records = state.provenanceRecords.filter(r => provenanceIds.includes(r.provenance_id));
+        
+        const snapshotIds = new Set(
+          records
+            .filter(r => r.entity_type === 'snapshot')
+            .map(r => r.entity_id)
+        );
+        const conclusionIds = new Set(
+          records
+            .filter(r => r.entity_type === 'conclusion')
+            .map(r => r.entity_id)
+        );
+
+        for (const r of records) {
+          if (r.entity_type === 'snapshot') {
+            state.sealedConclusions
+              .filter(c => c.snapshot_id === r.entity_id)
+              .forEach(c => conclusionIds.add(c.conclusion_id));
+          }
+        }
+
+        const snapshots = state.snapshots.filter(s => snapshotIds.has(s.snapshot_id));
+        const conclusions = state.sealedConclusions.filter(c => conclusionIds.has(c.conclusion_id));
+        
+        const relatedSnapshotIds = new Set([
+          ...snapshotIds,
+          ...conclusions.map(c => c.snapshot_id),
+        ]);
+        
+        const opLogs = [
+          ...state.snapshotOpLogs.filter(l => relatedSnapshotIds.has(l.snapshot_id)),
+          ...state.sealedConclusionOpLogs.filter(l => conclusionIds.has(l.conclusion_id || '')),
+        ];
+
+        const pkg: ProvenanceExportPackage = {
+          _type: 'provenance-package',
+          _version: 1,
+          exported_at: new Date().toISOString(),
+          provenance_records: records,
+          snapshots,
+          conclusions,
+          operation_logs: opLogs,
+        };
+
+        return JSON.stringify(pkg, null, 2);
+      },
+
+      temporaryRestore: (provenanceId: string): boolean => {
+        const state = get();
+        const record = state.provenanceRecords.find(r => r.provenance_id === provenanceId);
+        if (!record) return false;
+
+        if (state.temporaryRestoreSession?.is_active) {
+          state.discardTemporaryRestore();
+        }
+
+        let restored = false;
+        if (record.entity_type === 'snapshot') {
+          const snap = state.snapshots.find(s => s.snapshot_id === record.entity_id);
+          if (!snap) return false;
+
+          const session: TemporaryRestoreSession = {
+            session_id: genId('temp'),
+            provenance_id: provenanceId,
+            entity_type: 'snapshot',
+            entity_id: record.entity_id,
+            events_before: state.events.map(e => ({ ...e })),
+            filters_before: { ...state.filters },
+            restored_at: new Date().toISOString(),
+            is_active: true,
+          };
+
+          set({
+            events: snap.events.map(e => ({ ...e })),
+            filters: { ...snap.filters },
+            temporaryRestoreSession: session,
+          });
+
+          state.updateProvenancePlaybackTime(provenanceId);
+          restored = true;
+        } else {
+          const conc = state.sealedConclusions.find(c => c.conclusion_id === record.entity_id);
+          if (!conc) return false;
+
+          const currentEvent = state.events.find(e => e.event_id === conc.event_id);
+          if (!currentEvent) return false;
+
+          const session: TemporaryRestoreSession = {
+            session_id: genId('temp'),
+            provenance_id: provenanceId,
+            entity_type: 'conclusion',
+            entity_id: record.entity_id,
+            events_before: state.events.map(e => ({ ...e })),
+            filters_before: { ...state.filters },
+            restored_at: new Date().toISOString(),
+            is_active: true,
+          };
+
+          const events = state.events.map(e => {
+            if (e.event_id !== conc.event_id) return e;
+            return { ...conc.event_snapshot, updated_at: new Date().toISOString() };
+          });
+
+          set({
+            events,
+            temporaryRestoreSession: session,
+          });
+
+          state.updateProvenancePlaybackTime(provenanceId);
+          restored = true;
+        }
+
+        if (restored) {
+          const stateAfter = get();
+          stateAfter.addConflictDecision(provenanceId, {
+            type: 'identity',
+            existing_id: record.entity_id,
+            existing_name: record.current_name,
+            resolution: 'skip',
+            resolved_at: new Date().toISOString(),
+          });
+        }
+
+        return restored;
+      },
+
+      discardTemporaryRestore: (): boolean => {
+        const state = get();
+        const session = state.temporaryRestoreSession;
+        if (!session?.is_active) return false;
+
+        set({
+          events: session.events_before,
+          filters: session.filters_before,
+          temporaryRestoreSession: { ...session, is_active: false },
+        });
+
+        const stateAfter = get();
+        stateAfter.addConflictDecision(session.provenance_id, {
+          type: 'identity',
+          existing_id: session.entity_id,
+          existing_name: stateAfter.getProvenanceById(session.provenance_id)?.current_name || '',
+          resolution: 'keep_existing',
+          resolved_at: new Date().toISOString(),
+        });
+
+        return true;
+      },
+
+      canDiscardTemporaryRestore: (): boolean => {
+        return get().temporaryRestoreSession?.is_active === true;
+      },
+
+      hasActiveTemporaryRestore: (): boolean => {
+        return get().temporaryRestoreSession?.is_active === true;
+      },
     }),
     {
       name: 'allergy-board-store',
@@ -976,6 +1736,8 @@ export const useBoardStore = create<BoardState>()(
         sealedConclusions: state.sealedConclusions,
         sealedConclusionOpLogs: state.sealedConclusionOpLogs,
         sealedConclusionRestoreUndo: state.sealedConclusionRestoreUndo,
+        provenanceRecords: state.provenanceRecords,
+        temporaryRestoreSession: state.temporaryRestoreSession,
       }),
       onRehydrateStorage: () => (state) => {
         if (state) {

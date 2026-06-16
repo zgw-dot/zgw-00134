@@ -213,3 +213,107 @@ export interface SealedConclusionConflict {
 }
 
 export type SealedConclusionImportResolution = 'overwrite' | 'copy' | 'skip' | 'cancel';
+
+export type ProvenanceGenerationMethod = 
+  | 'seal'
+  | 'import_copy'
+  | 'import_overwrite'
+  | 'import_skip'
+  | 'branch'
+  | 'overwrite'
+  | 'copy'
+  | 'restore'
+  | 'undo_restore'
+  | 'temp_restore'
+  | 'temp_restore_discard';
+
+export type ProvenanceEntityType = 'snapshot' | 'conclusion';
+
+export interface ProvenanceConflictDecision {
+  type: 'name' | 'event_id' | 'conclusion_id' | 'identity';
+  existing_id: string;
+  existing_name: string;
+  resolution: 'keep_existing' | 'overwrite' | 'branch' | 'skip';
+  resolved_at: string;
+}
+
+export interface ProvenanceRecord {
+  provenance_id: string;
+  entity_type: ProvenanceEntityType;
+  entity_id: string;
+  original_name: string;
+  current_name: string;
+  generation_method: ProvenanceGenerationMethod;
+  event_count: number;
+  import_batch_id?: string;
+  import_batch_name?: string;
+  conflict_decisions: ProvenanceConflictDecision[];
+  last_playback_at?: string;
+  parent_provenance_id?: string;
+  root_provenance_id: string;
+  created_at: string;
+  updated_at: string;
+  is_original: boolean;
+  branch_depth: number;
+  identity_signature: string;
+}
+
+export interface ProvenanceTimelineNode {
+  provenance: ProvenanceRecord;
+  children: ProvenanceTimelineNode[];
+  operation_detail?: string;
+  overwrote_provenance_id?: string;
+}
+
+export interface TemporaryRestoreSession {
+  session_id: string;
+  provenance_id: string;
+  entity_type: ProvenanceEntityType;
+  entity_id: string;
+  events_before: RiskEvent[];
+  filters_before: FilterState;
+  restored_at: string;
+  is_active: boolean;
+}
+
+export interface ProvenanceImportConflict {
+  provenance_id_conflicts: string[];
+  entity_id_conflicts: string[];
+  name_conflicts: string[];
+  identity_conflicts: {
+    incoming_signature: string;
+    existing_signature: string;
+    existing_provenance_id: string;
+  }[];
+}
+
+export type ProvenanceImportResolution = 
+  | 'keep_existing'
+  | 'branch'
+  | 'overwrite_target'
+  | 'cancel';
+
+export interface ProvenanceExportPackage {
+  _type: 'provenance-package';
+  _version: 1;
+  exported_at: string;
+  provenance_records: ProvenanceRecord[];
+  snapshots: ReviewSnapshot[];
+  conclusions: SealedEventConclusion[];
+  operation_logs: (SnapshotOpLog | SealedConclusionOpLog)[];
+}
+
+export interface ProvenanceSummary {
+  provenance_id: string;
+  entity_type: ProvenanceEntityType;
+  original_name: string;
+  current_name: string;
+  generation_method: ProvenanceGenerationMethod;
+  event_count: number;
+  created_at: string;
+  last_playback_at?: string;
+  is_original: boolean;
+  branch_depth: number;
+  has_children: boolean;
+  conflict_count: number;
+}

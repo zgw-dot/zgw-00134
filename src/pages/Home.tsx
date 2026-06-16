@@ -17,14 +17,26 @@ import SealedConclusionPanel from '@/components/SealedConclusionPanel';
 import SealedConclusionDetailDrawer from '@/components/SealedConclusionDetailDrawer';
 import SealedConclusionConflictModal from '@/components/SealedConclusionConflictModal';
 import SealedConclusionOpLogPanel from '@/components/SealedConclusionOpLogPanel';
+import ProvenancePanel from '@/components/ProvenancePanel';
+import ProvenanceConflictModal from '@/components/ProvenanceConflictModal';
 import { applyFilters } from '@/utils/filters';
-import type { BoardStats, ReviewSnapshot, SnapshotConflict, SealedEventConclusion, SealedConclusionConflict } from '@/types';
+import type {
+  BoardStats,
+  ReviewSnapshot,
+  SnapshotConflict,
+  SealedEventConclusion,
+  SealedConclusionConflict,
+  ProvenanceExportPackage,
+  ProvenanceImportConflict,
+  ProvenanceImportResolution,
+} from '@/types';
 import {
   Upload,
   FileText,
   Settings2,
   Package,
   FileCheck,
+  Layers,
 } from 'lucide-react';
 
 export default function Home() {
@@ -49,10 +61,16 @@ export default function Home() {
   const [sealedConflictConclusions, setSealedConflictConclusions] = useState<SealedEventConclusion[]>([]);
   const [sealedConflictInfo, setSealedConflictInfo] = useState<SealedConclusionConflict | null>(null);
   const [sealedOpLogOpen, setSealedOpLogOpen] = useState(false);
+  const [provenanceOpen, setProvenanceOpen] = useState(false);
+  const [provenanceConflictPkg, setProvenanceConflictPkg] = useState<ProvenanceExportPackage | null>(null);
+  const [provenanceConflictInfo, setProvenanceConflictInfo] = useState<ProvenanceImportConflict | null>(null);
 
   const importSnapshot = useBoardStore((s) => s.importSnapshot);
   const importSealedConclusions = useBoardStore((s) => s.importSealedConclusions);
+  const importProvenancePackage = useBoardStore((s) => s.importProvenancePackage);
+  const getProvenanceSummaries = useBoardStore((s) => s.getProvenanceSummaries);
   const sealedConclusions = useBoardStore((s) => s.sealedConclusions);
+  const provenanceSummaries = getProvenanceSummaries();
 
   const stats = useMemo<BoardStats>(() => {
     const s: BoardStats = {
@@ -111,6 +129,23 @@ export default function Home() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setProvenanceOpen(true)}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-md border border-slate-700 px-3 py-1.5',
+                'text-sm font-medium text-slate-300 bg-slate-800/50',
+                'hover:bg-slate-800 hover:text-slate-100 transition-colors'
+              )}
+            >
+              <Layers className="h-4 w-4" />
+              来历账本
+              {provenanceSummaries.length > 0 && (
+                <span className="rounded-full bg-violet-500/20 text-violet-300 px-1.5 py-0.5 text-[10px]">
+                  {provenanceSummaries.length}
+                </span>
+              )}
+            </button>
             <button
               type="button"
               onClick={() => setSealedConclusionOpen(true)}
@@ -275,6 +310,26 @@ export default function Home() {
             }
             setSealedConflictConclusions([]);
             setSealedConflictInfo(null);
+          }}
+        />
+      )}
+
+      <ProvenancePanel
+        open={provenanceOpen}
+        onClose={() => setProvenanceOpen(false)}
+        onConflict={(pkg, conflict) => { setProvenanceConflictPkg(pkg); setProvenanceConflictInfo(conflict); }}
+      />
+
+      {provenanceConflictPkg && provenanceConflictInfo && (
+        <ProvenanceConflictModal
+          pkg={provenanceConflictPkg}
+          conflict={provenanceConflictInfo}
+          onResolve={(resolution: ProvenanceImportResolution, targetProvenanceId?: string) => {
+            if (provenanceConflictPkg) {
+              importProvenancePackage(provenanceConflictPkg, resolution, targetProvenanceId);
+            }
+            setProvenanceConflictPkg(null);
+            setProvenanceConflictInfo(null);
           }}
         />
       )}
